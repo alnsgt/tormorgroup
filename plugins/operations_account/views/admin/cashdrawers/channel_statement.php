@@ -47,7 +47,7 @@ foreach ($entries as $entry) {
 	$creditTotal += (float)($entry['credit'] ?? 0);
 	$debitTotal += (float)($entry['debit'] ?? 0);
 }
-$closingTotal = $entries ? (float)($entries[count($entries) - 1]['closing'] ?? 0) : 0.0;
+$closingTotal = $entries ? (float)($entries[0]['balance_after'] ?? 0) : 0.0;
 $formatDate = static function ($value): string {
 	$value = trim((string)$value);
 	if ($value === '') {
@@ -198,9 +198,13 @@ $statementQuery = http_build_query($statementQueryParams);
 	.channel-statement-table .statement-date .statement-drawer,
 	.channel-statement-table .statement-reference .statement-movement,
 	.channel-statement-table .statement-reference .statement-status,
-	.channel-statement-table .statement-reference .statement-actor { display: block; }
+	.channel-statement-table .statement-reference .statement-actor,
+	.channel-statement-table .statement-reference .statement-transaction-detail,
+	.channel-statement-table .statement-transaction-detail span { display: block; }
 	.channel-statement-table .statement-reference .statement-status { width: fit-content; margin-top: .3rem; }
 	.channel-statement-table .statement-reference .statement-actor { margin-top: .2rem; }
+	.channel-statement-table .statement-transaction-detail { margin-top: .35rem; color: var(--statement-muted); font-size: .75rem; overflow-wrap: anywhere; }
+	.channel-statement-table .statement-transaction-detail strong { color: var(--statement-text); }
 	.channel-statement-table .statement-reference { white-space: normal; }
 	.channel-statement-table .statement-drawer { color: var(--statement-muted); font-weight: 700; white-space: nowrap; }
 	.channel-statement-table .statement-status { display: inline-block; padding: .2rem .45rem; border: 1px solid var(--statement-border); border-radius: 999px; background: var(--statement-subtle); color: var(--statement-text); font-size: .72rem; font-weight: 700; }
@@ -383,10 +387,10 @@ $statementQuery = http_build_query($statementQueryParams);
 					<th>Date &amp; drawer</th>
 					<th>Reference / movement &amp; status</th>
 					<?php if (($statement['channel_type'] ?? '') === 'cash'): ?><th>Denomination × count</th><?php endif; ?>
-					<th class="statement-number">Opening</th>
+					<th class="statement-number">Balance before</th>
 					<th class="statement-number">Credit / in</th>
 					<th class="statement-number">Debit / out</th>
-					<th class="statement-number">Closing / amount</th>
+					<th class="statement-number">Balance after</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -395,6 +399,27 @@ $statementQuery = http_build_query($statementQueryParams);
 				<?php else: ?>
 					<?php foreach ($entries as $entry): ?>
 						<?php $movement = trim((string)($entry['description'] ?? '')); ?>
+						<?php
+							$transactionDetail = is_array($entry['transaction_detail'] ?? null) ? $entry['transaction_detail'] : [];
+							$transactionDetailParts = [];
+							foreach (['type' => 'Type', 'network' => 'Network', 'phone' => 'Phone', 'reference' => 'Ref'] as $detailKey => $detailLabel) {
+								$detailValue = trim((string)($transactionDetail[$detailKey] ?? ''));
+								if ($detailValue !== '') {
+									$transactionDetailParts[] = $detailLabel . ': ' . $detailValue;
+								}
+							}
+							if (isset($transactionDetail['amount']) && is_numeric($transactionDetail['amount'])) {
+								$detailCurrency = trim((string)($transactionDetail['currency'] ?? '')) ?: 'GHS';
+								$transactionDetailParts[] = 'Amount: ' . $detailCurrency . ' ' . $formatMoney($transactionDetail['amount']);
+							}
+							$transactionSummary = array_values(array_filter(
+								is_array($transactionDetail['summary'] ?? null) ? $transactionDetail['summary'] : [],
+								static function ($item): bool {
+									return trim((string)$item) !== '' && !preg_match('/:\s*$/', (string)$item);
+								}
+							));
+							$transactionSummary = array_slice($transactionSummary, 0, 6);
+						?>
 						<tr>
 							<td class="statement-date" data-label="Date / drawer">
 								<strong><?= $escape($formatDate($entry['date'] ?? '')) ?></strong>
@@ -405,14 +430,21 @@ $statementQuery = http_build_query($statementQueryParams);
 								<span class="statement-movement"><?= $escape($movement) ?></span>
 								<span class="statement-status"><?= $escape($entry['status'] ?? '') ?></span>
 								<?php if (!empty($entry['actor'])): ?><span class="statement-actor">Recorded by <?= $escape($entry['actor']) ?></span><?php endif; ?>
+								<?php if ($transactionDetailParts || $transactionSummary): ?>
+									<span class="statement-transaction-detail">
+										<?php if (!empty($transactionDetail['label'])): ?><strong><?= $escape($transactionDetail['label']) ?></strong><?php endif; ?>
+										<?php if ($transactionDetailParts): ?><span><?= $escape(implode(' · ', $transactionDetailParts)) ?></span><?php endif; ?>
+										<?php if ($transactionSummary): ?><span><?= $escape(implode(' · ', $transactionSummary)) ?></span><?php endif; ?>
+									</span>
+								<?php endif; ?>
 							</td>
 							<?php if (($statement['channel_type'] ?? '') === 'cash'): ?>
 								<td data-label="Denomination × count"><?= ($entry['denomination'] ?? '') !== '' ? $escape(number_format((float)$entry['denomination'], $currency === 'CFA' ? 0 : 2) . ' × ' . (int)($entry['count'] ?? 0)) : '—' ?></td>
 							<?php endif; ?>
-							<td class="statement-number" data-label="Opening"><?= (($statement['channel_type'] ?? '') === 'ecash' || $movement === 'Opening balance snapshot' || (float)($entry['opening'] ?? 0) != 0.0) ? $currency . ' ' . $formatMoney($entry['opening']) : '—' ?></td>
+							<td class="statement-number" data-label="Balance before"><?= ($entry['balance_before'] ?? null) !== null ? $currency . ' ' . $formatMoney($entry['balance_before']) : '—' ?></td>
 							<td class="statement-number statement-credit" data-label="Credit / in"><?= (float)($entry['credit'] ?? 0) != 0.0 ? '+' . $currency . ' ' . $formatMoney($entry['credit']) : '—' ?></td>
 							<td class="statement-number statement-debit" data-label="Debit / out"><?= (float)($entry['debit'] ?? 0) != 0.0 ? '−' . $currency . ' ' . $formatMoney($entry['debit']) : '—' ?></td>
-							<td class="statement-number" data-label="Closing / amount"><?= ($entry['closing'] ?? null) !== null ? $currency . ' ' . $formatMoney($entry['closing']) : '—' ?></td>
+							<td class="statement-number" data-label="Balance after"><?= ($entry['balance_after'] ?? null) !== null ? $currency . ' ' . $formatMoney($entry['balance_after']) : '—' ?></td>
 						</tr>
 					<?php endforeach; ?>
 				<?php endif; ?>

@@ -43,8 +43,11 @@ $pdfStyles = '
 	.channel-statement-table .statement-date, .channel-statement-table .statement-reference { white-space: normal; }
 	.channel-statement-table .statement-date strong, .channel-statement-table .statement-date .statement-drawer,
 	.channel-statement-table .statement-reference .statement-movement, .channel-statement-table .statement-reference .statement-status,
-	.channel-statement-table .statement-reference .statement-actor { display: block; }
+	.channel-statement-table .statement-reference .statement-actor,
+	.channel-statement-table .statement-reference .statement-transaction-detail,
+	.channel-statement-table .statement-transaction-detail span { display: block; }
 	.channel-statement-table .statement-reference .statement-status { margin-top: 3px; }
+	.channel-statement-table .statement-transaction-detail { margin-top: 3px; color: #5b6b7c; font-size: 6pt; overflow-wrap: anywhere; }
 	.channel-statement-table .statement-drawer, .channel-statement-table .statement-actor { color: #5b6b7c; }
 	.channel-statement-table .statement-status { color: #1d2b40; font-weight: bold; }
 	.channel-statement-footer { margin-top: 8px; color: #5b6b7c; font-size: 6.5pt; }

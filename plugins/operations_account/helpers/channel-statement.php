@@ -137,7 +137,8 @@ if (!function_exists('operations_account_get_channel_statement')) {
 					'opening' => (float)($record->opening_balance ?? 0),
 					'credit' => (float)($record->credit ?? 0),
 					'debit' => (float)($record->debit ?? 0),
-					'closing' => (float)($record->closing_balance ?? (
+					'balance_before' => (float)($record->opening_balance ?? 0),
+					'balance_after' => (float)($record->closing_balance ?? (
 						(float)($record->opening_balance ?? 0)
 						+ (float)($record->credit ?? 0)
 						- (float)($record->debit ?? 0)
@@ -197,11 +198,29 @@ if (!function_exists('operations_account_get_channel_statement')) {
 						'opening' => $isOpening ? $volume : 0.0,
 						'credit' => !$isOpening && $volume > 0 ? $volume : 0.0,
 						'debit' => !$isOpening && $volume < 0 ? abs($volume) : 0.0,
-						'closing' => null,
+						'balance_before' => null,
+						'balance_after' => null,
 					];
 				}
 			}
 		}
+
+		$transactionDetailCache = [];
+		foreach ($entries as &$entry) {
+			$transId = (int)($entry['reference'] ?? 0);
+			$entry['transaction_detail'] = null;
+			if ($transId <= 0 || !function_exists('operations_account_find_transaction_detail')) {
+				continue;
+			}
+
+			$status = trim((string)($entry['status'] ?? ''));
+			$cacheKey = $transId . '|' . strtolower($status);
+			if (!array_key_exists($cacheKey, $transactionDetailCache)) {
+				$transactionDetailCache[$cacheKey] = operations_account_find_transaction_detail($db, $transId, $status);
+			}
+			$entry['transaction_detail'] = $transactionDetailCache[$cacheKey];
+		}
+		unset($entry);
 
 		$creditTotal = 0.0;
 		$debitTotal = 0.0;
@@ -215,11 +234,16 @@ if (!function_exists('operations_account_get_channel_statement')) {
 					$runningDrawerId = $entryDrawerId;
 					$runningBalance = 0.0;
 				}
+				$entry['balance_before'] = $runningBalance;
 				$runningBalance += (float)$entry['opening'] + (float)$entry['credit'] - (float)$entry['debit'];
-				$entry['closing'] = $runningBalance;
+				$entry['balance_after'] = $runningBalance;
 			}
 			unset($entry);
 		}
+		usort($entries, static function (array $a, array $b): int {
+			return strcmp((string)($b['date'] ?? ''), (string)($a['date'] ?? ''));
+		});
+
 		foreach ($entries as $entry) {
 			$creditTotal += (float)$entry['credit'];
 			$debitTotal += (float)$entry['debit'];
@@ -239,7 +263,7 @@ if (!function_exists('operations_account_get_channel_statement')) {
 			'opening_total' => $openingTotal,
 			'credit_total' => $creditTotal,
 			'debit_total' => $debitTotal,
-			'closing_total' => $entries ? (float)($entries[count($entries) - 1]['closing'] ?? 0) : 0.0,
+			'closing_total' => $entries ? (float)($entries[0]['balance_after'] ?? 0) : 0.0,
 		];
 	}
 }
