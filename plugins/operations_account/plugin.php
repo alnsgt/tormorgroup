@@ -1091,6 +1091,66 @@ if(!function_exists('operations_account_find_transaction_detail')){
 			}
 		}
 
+		if(stripos(trim($sourceStatus), 'exchange') !== false && $db->table_exists(['logs'])){
+			$rows = $db->query(
+				"SELECT description, date_created
+				 FROM logs
+				 WHERE id = :id AND table_name = 'cashdrawer_channel_exchange'
+				 LIMIT 1",
+				['id' => $transId]
+			) ?: [];
+			if(!empty($rows)){
+				$row = $rows[0];
+				$description = (string)($row->description ?? '');
+				$sourceChannel = '';
+				$destinationChannel = '';
+				$amount = 0.0;
+				if(preg_match('/Channel exchange for drawer_id:\s*\d+\s+from\s+(.+?)\s+to\s+(.+?)\.\s+Amount:\s*([0-9]+(?:\.[0-9]+)?)/i', $description, $matches)){
+					$sourceChannel = (string)$matches[1];
+					$destinationChannel = (string)$matches[2];
+					$amount = (float)$matches[3];
+				}elseif(preg_match('/\bfrom=([^\s]+)\s+to=([^\s]+)\s+amount=([0-9.]+)/i', $description, $matches)){
+					$sourceChannel = (string)$matches[1];
+					$destinationChannel = (string)$matches[2];
+					$amount = (float)$matches[3];
+				}
+
+				if($sourceChannel !== '' && $destinationChannel !== ''){
+					$formatChannel = static function(string $channel): string {
+						return trim(str_replace(['_', '-'], ' ', strtoupper(trim($channel))));
+					};
+					$summary = [
+						'Source channel: ' . $formatChannel($sourceChannel),
+						'Destination channel: ' . $formatChannel($destinationChannel),
+					];
+					if($amount > 0){
+						$summary[] = 'Amount exchanged: GHS ' . number_format($amount, 2);
+					}
+					if(preg_match('/;\s*Fee:\s*GHS\s*([0-9]+(?:\.[0-9]+)?)/i', $description, $feeMatch)){
+						$summary[] = 'Fee: GHS ' . number_format((float)$feeMatch[1], 2);
+					}
+					if(preg_match('/;\s*Total debited:\s*GHS\s*([0-9]+(?:\.[0-9]+)?)/i', $description, $debitMatch)){
+						$summary[] = 'Total debited: GHS ' . number_format((float)$debitMatch[1], 2);
+					}
+					return [
+						'table' => 'cashdrawer_channel_exchange',
+						'label' => 'Channel Exchange',
+						'id' => $transId,
+						'lookup_id' => $transId,
+						'status' => trim($sourceStatus) ?: 'Exchange',
+						'date_created' => (string)($row->date_created ?? ''),
+						'amount' => $amount,
+						'currency' => 'GHS',
+						'type' => 'Channel exchange',
+						'network' => '',
+						'phone' => '',
+						'reference' => '',
+						'summary' => $summary,
+					];
+				}
+			}
+		}
+
 		$tables = [
 			'momoremits',
 			'agencybankings',
