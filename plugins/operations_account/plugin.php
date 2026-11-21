@@ -2,7 +2,10 @@
 
 require_once dirname(__DIR__) . '/users-manager/helpers/shared-account-assignments.php';
 require_once __DIR__ . '/helpers/channel-statement.php';
+require_once __DIR__ . '/helpers/channel-movement-history.php';
 require_once __DIR__ . '/helpers/cashdrawer-edit-approvals.php';
+
+operations_account_ensure_channel_movement_history_schema(new \Core\Database);
 
 /**
  * Plugin name: MyWallet

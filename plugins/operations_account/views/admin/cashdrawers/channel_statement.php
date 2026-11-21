@@ -42,12 +42,17 @@ $entries = array_values(array_filter($allEntries, static function ($entry) use (
 $openingTotal = 0.0;
 $creditTotal = 0.0;
 $debitTotal = 0.0;
+$latestBalancesByDrawer = [];
 foreach ($entries as $entry) {
 	$openingTotal += (float)($entry['opening'] ?? 0);
 	$creditTotal += (float)($entry['credit'] ?? 0);
 	$debitTotal += (float)($entry['debit'] ?? 0);
+	$entryDrawerId = (int)($entry['drawer_id'] ?? 0);
+	if (!array_key_exists($entryDrawerId, $latestBalancesByDrawer)) {
+		$latestBalancesByDrawer[$entryDrawerId] = (float)($entry['balance_after'] ?? 0);
+	}
 }
-$closingTotal = $entries ? (float)($entries[0]['balance_after'] ?? 0) : 0.0;
+$closingTotal = array_sum($latestBalancesByDrawer);
 $formatDate = static function ($value): string {
 	$value = trim((string)$value);
 	if ($value === '') {
@@ -210,6 +215,9 @@ $statementQuery = http_build_query($statementQueryParams);
 	.channel-statement-table .statement-status { display: inline-block; padding: .2rem .45rem; border: 1px solid var(--statement-border); border-radius: 999px; background: var(--statement-subtle); color: var(--statement-text); font-size: .72rem; font-weight: 700; }
 	.channel-statement-table .statement-actor { display: block; margin-top: .25rem; color: var(--statement-muted); font-size: .75rem; }
 	.channel-statement-table .statement-number { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+	.channel-statement-table .statement-denominations { width: 12%; max-width: 12rem; white-space: normal; overflow-wrap: anywhere; }
+	.channel-statement-table .statement-denomination-list { max-width: 12rem; line-height: 1.6; }
+	.channel-statement-table .statement-denomination-list span { display: inline-block; margin-right: .35rem; white-space: nowrap; }
 	.channel-statement-table .statement-credit { color: #16834a; font-weight: 750; }
 	.channel-statement-table .statement-debit { color: #c33f4a; font-weight: 750; }
 	.channel-statement-empty { padding: 2.5rem 1rem !important; color: var(--statement-muted) !important; text-align: center; }
@@ -401,6 +409,12 @@ $statementQuery = http_build_query($statementQueryParams);
 						<?php $movement = trim((string)($entry['description'] ?? '')); ?>
 						<?php
 							$transactionDetail = is_array($entry['transaction_detail'] ?? null) ? $entry['transaction_detail'] : [];
+							$denominationDetails = [];
+							foreach (is_array($entry['denominations'] ?? null) ? $entry['denominations'] : [] as $denominationRow) {
+								$denominationValue = (float)($denominationRow['denomination'] ?? 0);
+								$denominationCount = (int)($denominationRow['count'] ?? 0);
+								$denominationDetails[] = number_format($denominationValue, $currency === 'CFA' ? 0 : 2) . ' × ' . $denominationCount;
+							}
 							$transactionDetailParts = [];
 							foreach (['type' => 'Type', 'network' => 'Network', 'phone' => 'Phone', 'reference' => 'Ref'] as $detailKey => $detailLabel) {
 								$detailValue = trim((string)($transactionDetail[$detailKey] ?? ''));
@@ -430,8 +444,9 @@ $statementQuery = http_build_query($statementQueryParams);
 								<span class="statement-movement"><?= $escape($movement) ?></span>
 								<span class="statement-status"><?= $escape($entry['status'] ?? '') ?></span>
 								<?php if (!empty($entry['actor'])): ?><span class="statement-actor">Recorded by <?= $escape($entry['actor']) ?></span><?php endif; ?>
-								<?php if ($transactionDetailParts || $transactionSummary): ?>
+								<?php if (!empty($entry['detail_context']) || !empty($transactionDetail['label']) || $transactionDetailParts || $transactionSummary): ?>
 									<span class="statement-transaction-detail">
+										<?php if (!empty($entry['detail_context'])): ?><strong><?= $escape($entry['detail_context']) ?></strong><?php endif; ?>
 										<?php if (!empty($transactionDetail['label'])): ?><strong><?= $escape($transactionDetail['label']) ?></strong><?php endif; ?>
 										<?php if ($transactionDetailParts): ?><span><?= $escape(implode(' · ', $transactionDetailParts)) ?></span><?php endif; ?>
 										<?php if ($transactionSummary): ?><span><?= $escape(implode(' · ', $transactionSummary)) ?></span><?php endif; ?>
@@ -439,7 +454,11 @@ $statementQuery = http_build_query($statementQueryParams);
 								<?php endif; ?>
 							</td>
 							<?php if (($statement['channel_type'] ?? '') === 'cash'): ?>
-								<td data-label="Denomination × count"><?= ($entry['denomination'] ?? '') !== '' ? $escape(number_format((float)$entry['denomination'], $currency === 'CFA' ? 0 : 2) . ' × ' . (int)($entry['count'] ?? 0)) : '—' ?></td>
+								<td class="statement-denominations" data-label="Denomination × count">
+									<?php if ($denominationDetails): ?>
+										<div class="statement-denomination-list"><?php foreach ($denominationDetails as $denominationDetail): ?><span><?= $escape($denominationDetail) ?></span><?php endforeach; ?></div>
+									<?php else: ?>—<?php endif; ?>
+								</td>
 							<?php endif; ?>
 							<td class="statement-number" data-label="Balance before"><?= ($entry['balance_before'] ?? null) !== null ? $currency . ' ' . $formatMoney($entry['balance_before']) : '—' ?></td>
 							<td class="statement-number statement-credit" data-label="Credit / in"><?= (float)($entry['credit'] ?? 0) != 0.0 ? '+' . $currency . ' ' . $formatMoney($entry['credit']) : '—' ?></td>

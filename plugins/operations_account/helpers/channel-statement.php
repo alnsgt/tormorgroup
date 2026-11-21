@@ -103,6 +103,7 @@ if (!function_exists('operations_account_get_channel_statement')) {
 				"SELECT b.id, b.drawer_id, b.user_id, b.channel_key, b.opening_balance,
 				        b.credit, b.debit, b.closing_balance, b.trans_id, b.trans_status,
 				        {$balanceDate} AS movement_date,
+				        cd.date_created AS drawer_date,
 				        {$actorName} AS actor_name
 				 FROM drawer_balances b
 				 INNER JOIN cashdrawers cd ON cd.id = b.drawer_id
@@ -118,6 +119,7 @@ if (!function_exists('operations_account_get_channel_statement')) {
 
 		$entries = [];
 		if ($channelType === 'ecash') {
+			$balanceRowsByDrawer = [];
 			foreach ($balanceRows as $record) {
 				if (operations_account_normalize_statement_channel_key('ecash', (string)($record->channel_key ?? '')) !== $channelKey) {
 					continue;
@@ -125,25 +127,156 @@ if (!function_exists('operations_account_get_channel_statement')) {
 				if (!$isShared && (int)($record->user_id ?? 0) !== $ownerId) {
 					continue;
 				}
-				$entries[] = [
-					'date' => (string)($record->movement_date ?? $record->date_created ?? $record->drawer_date ?? ''),
-					'drawer_id' => (int)($record->drawer_id ?? 0),
+				$balanceRowsByDrawer[(int)($record->drawer_id ?? 0)] = $record;
+			}
+
+			$movementRows = [];
+			if ($db->table_exists(['drawer_balance_movements'])) {
+				$movementParams = ['channel_type' => 'ecash'];
+				$movementUserFilter = '';
+				if (!$isShared) {
+					$movementUserFilter = ' AND m.user_id = :user_id AND cd.user_id = :drawer_owner_id';
+					$movementParams['user_id'] = $ownerId;
+					$movementParams['drawer_owner_id'] = $ownerId;
+				}
+				$movementRows = $db->query(
+					"SELECT m.id, m.drawer_id, m.user_id, m.channel_type, m.channel_key,
+					        m.trans_id, m.trans_status, m.date_created, m.balance_before,
+					        m.credit, m.debit, m.balance_after
+					 FROM drawer_balance_movements m
+					 INNER JOIN cashdrawers cd ON cd.id = m.drawer_id
+					 WHERE m.channel_type = :channel_type{$movementUserFilter}
+					 ORDER BY m.date_created, m.id",
+					$movementParams
+				) ?: [];
+				if ($db->has_error) {
+					throw new \RuntimeException('Unable to load transaction-level e-cash movements: ' . (string)$db->error);
+				}
+			}
+
+			$movementsByDrawer = [];
+			foreach ($movementRows as $record) {
+				if (operations_account_normalize_statement_channel_key('ecash', (string)($record->channel_key ?? '')) !== $channelKey) {
+					continue;
+				}
+				$drawerIdForMovement = (int)($record->drawer_id ?? 0);
+				$movementsByDrawer[$drawerIdForMovement][] = [
+					'date' => (string)($record->date_created ?? ''),
+					'drawer_id' => $drawerIdForMovement,
+					'_sort_id' => (int)($record->id ?? 0),
 					'reference' => !empty($record->trans_id) ? (string)$record->trans_id : '',
 					'status' => trim((string)($record->trans_status ?? '')) ?: 'Recorded',
-					'actor' => trim((string)($record->actor_name ?? '')),
-					'description' => 'E-cash channel balance record',
+					'actor' => '',
+					'description' => 'E-cash transaction movement',
 					'denomination' => '',
+					'denominations' => [],
 					'count' => '',
-					'opening' => (float)($record->opening_balance ?? 0),
+					'opening' => 0.0,
 					'credit' => (float)($record->credit ?? 0),
 					'debit' => (float)($record->debit ?? 0),
-					'balance_before' => (float)($record->opening_balance ?? 0),
-					'balance_after' => (float)($record->closing_balance ?? (
-						(float)($record->opening_balance ?? 0)
-						+ (float)($record->credit ?? 0)
-						- (float)($record->debit ?? 0)
-					)),
+					'balance_before' => (float)($record->balance_before ?? 0),
+					'balance_after' => (float)($record->balance_after ?? 0),
 				];
+			}
+
+			foreach ($balanceRowsByDrawer as $balanceDrawerId => $record) {
+				$opening = (float)($record->opening_balance ?? 0);
+				$credit = (float)($record->credit ?? 0);
+				$debit = (float)($record->debit ?? 0);
+				$closing = (float)($record->closing_balance ?? ($opening + $credit - $debit));
+				$drawerMovements = $movementsByDrawer[$balanceDrawerId] ?? [];
+				if ($drawerMovements) {
+					$firstMovementBalance = (float)$drawerMovements[0]['balance_before'];
+					$recordedCredit = array_sum(array_column($drawerMovements, 'credit'));
+					$recordedDebit = array_sum(array_column($drawerMovements, 'debit'));
+					$historicalCredit = max($credit - $recordedCredit, 0.0);
+					$historicalDebit = max($debit - $recordedDebit, 0.0);
+					if (abs($opening + $historicalCredit - $historicalDebit - $firstMovementBalance) > 0.01) {
+						$historicalDelta = $firstMovementBalance - $opening;
+						$historicalCredit = max($historicalDelta, 0.0);
+						$historicalDebit = max(-$historicalDelta, 0.0);
+					}
+					$entries[] = [
+						'date' => (string)($record->drawer_date ?? $record->movement_date ?? ''),
+						'drawer_id' => $balanceDrawerId,
+						'reference' => '',
+						'status' => 'Opening snapshot',
+						'actor' => '',
+						'description' => 'Opening balance snapshot',
+						'denomination' => '',
+						'denominations' => [],
+						'count' => '',
+						'opening' => $opening,
+						'credit' => 0.0,
+						'debit' => 0.0,
+						'balance_before' => 0.0,
+						'balance_after' => $opening,
+					];
+					if ($historicalCredit + $historicalDebit > 0.00001) {
+						$entries[] = [
+							'date' => (string)($drawerMovements[0]['date'] ?? $record->drawer_date ?? ''),
+							'drawer_id' => $balanceDrawerId,
+							'reference' => '',
+							'status' => 'Historical summary',
+							'actor' => '',
+							'description' => 'Earlier transactions are summarized because per-transaction records were not retained',
+							'denomination' => '',
+							'denominations' => [],
+							'count' => '',
+							'opening' => 0.0,
+							'credit' => $historicalCredit,
+							'debit' => $historicalDebit,
+							'balance_before' => $opening,
+							'balance_after' => $firstMovementBalance,
+						];
+					}
+					array_push($entries, ...$drawerMovements);
+					continue;
+				}
+
+				if (abs($closing - $opening) < 0.00001 && $credit + $debit < 0.00001) {
+					$entries[] = [
+						'date' => (string)($record->drawer_date ?? $record->movement_date ?? ''),
+						'drawer_id' => $balanceDrawerId,
+						'reference' => '',
+						'status' => 'Opening snapshot',
+						'actor' => '',
+						'description' => 'Opening balance snapshot',
+						'denomination' => '',
+						'denominations' => [],
+						'count' => '',
+						'opening' => $opening,
+						'credit' => 0.0,
+						'debit' => 0.0,
+						'balance_before' => 0.0,
+						'balance_after' => $opening,
+					];
+					continue;
+				}
+
+				$entries[] = [
+					'date' => (string)($record->movement_date ?? $record->drawer_date ?? ''),
+					'drawer_id' => $balanceDrawerId,
+					'reference' => '',
+					'detail_reference' => !empty($record->trans_id) ? (string)$record->trans_id : '',
+					'detail_context' => 'Latest linked transaction',
+					'status' => 'Historical summary',
+					'actor' => trim((string)($record->actor_name ?? '')),
+					'description' => 'Per-transaction history was not retained for this balance',
+					'denomination' => '',
+					'denominations' => [],
+					'count' => '',
+					'opening' => $opening,
+					'credit' => $credit,
+					'debit' => $debit,
+					'balance_before' => 0.0,
+					'balance_after' => $closing,
+				];
+			}
+			foreach ($movementsByDrawer as $balanceDrawerId => $drawerMovements) {
+				if (!isset($balanceRowsByDrawer[$balanceDrawerId])) {
+					array_push($entries, ...$drawerMovements);
+				}
 			}
 		} else {
 			$cashTable = $channelKey === 'CASH-CFA' ? 'drawer_fx_denos' : 'drawer_denos';
@@ -182,32 +315,55 @@ if (!function_exists('operations_account_get_channel_statement')) {
 				if ($db->has_error) {
 					throw new \RuntimeException('Unable to load cash channel movements: ' . (string)$db->error);
 				}
+				$cashMovements = [];
+				$unlinkedMovementIndex = 0;
 				foreach ($cashRows as $record) {
 					$volume = (float)($record->volume ?? 0);
 					$status = trim((string)($record->trans_status ?? '')) ?: 'Recorded';
 					$isOpening = stripos($status, 'opening') !== false;
-					$entries[] = [
-						'date' => (string)($record->date_created ?? $record->drawer_date ?? ''),
-						'drawer_id' => (int)($record->drawer_id ?? 0),
-						'reference' => !empty($record->trans_id) ? (string)$record->trans_id : '',
-						'status' => $status,
-						'actor' => trim((string)($record->actor_name ?? '')),
-						'description' => $isOpening ? 'Opening balance snapshot' : 'Cash denomination movement',
+					$transId = (int)($record->trans_id ?? 0);
+					$drawerIdForMovement = (int)($record->drawer_id ?? 0);
+					$movementKey = $transId > 0
+						? $drawerIdForMovement . '|' . $transId . '|' . ($isOpening ? 'opening' : 'transaction')
+						: 'unlinked-' . (++$unlinkedMovementIndex);
+					if (!isset($cashMovements[$movementKey])) {
+						$cashMovements[$movementKey] = [
+							'date' => (string)($record->date_created ?? $record->drawer_date ?? ''),
+							'drawer_id' => $drawerIdForMovement,
+							'_sort_id' => (int)($record->id ?? 0),
+							'reference' => !$isOpening && $transId > 0 ? (string)$transId : '',
+							'status' => $status,
+							'actor' => trim((string)($record->actor_name ?? '')),
+							'description' => $isOpening ? 'Opening balance snapshot' : 'Cash transaction movement',
+							'denomination' => '',
+							'denominations' => [],
+							'count' => '',
+							'opening' => 0.0,
+							'credit' => 0.0,
+							'debit' => 0.0,
+							'balance_before' => null,
+							'balance_after' => null,
+						];
+					}
+					$movement = &$cashMovements[$movementKey];
+					$movement['date'] = max((string)$movement['date'], (string)($record->date_created ?? ''));
+					$movement['status'] = $status;
+					$movement['opening'] += $isOpening ? $volume : 0.0;
+					$movement['credit'] += !$isOpening && $volume > 0 ? $volume : 0.0;
+					$movement['debit'] += !$isOpening && $volume < 0 ? abs($volume) : 0.0;
+					$movement['denominations'][] = [
 						'denomination' => (float)($record->denomination ?? 0),
 						'count' => (int)($record->count ?? 0),
-						'opening' => $isOpening ? $volume : 0.0,
-						'credit' => !$isOpening && $volume > 0 ? $volume : 0.0,
-						'debit' => !$isOpening && $volume < 0 ? abs($volume) : 0.0,
-						'balance_before' => null,
-						'balance_after' => null,
 					];
+					unset($movement);
 				}
+				$entries = array_values($cashMovements);
 			}
 		}
 
 		$transactionDetailCache = [];
 		foreach ($entries as &$entry) {
-			$transId = (int)($entry['reference'] ?? 0);
+			$transId = (int)($entry['detail_reference'] ?? $entry['reference'] ?? 0);
 			$entry['transaction_detail'] = null;
 			if ($transId <= 0 || !function_exists('operations_account_find_transaction_detail')) {
 				continue;
@@ -226,22 +382,39 @@ if (!function_exists('operations_account_get_channel_statement')) {
 		$debitTotal = 0.0;
 		$openingTotal = 0.0;
 		$runningBalance = 0.0;
-		$runningDrawerId = 0;
 		if ($channelType === 'cash') {
+			usort($entries, static function (array $a, array $b): int {
+				$dateOrder = strcmp((string)($a['date'] ?? ''), (string)($b['date'] ?? ''));
+				if ($dateOrder !== 0) {
+					return $dateOrder;
+				}
+				$drawerOrder = (int)($a['drawer_id'] ?? 0) <=> (int)($b['drawer_id'] ?? 0);
+				return $drawerOrder !== 0
+					? $drawerOrder
+					: ((int)($a['_sort_id'] ?? 0) <=> (int)($b['_sort_id'] ?? 0));
+			});
+			$runningBalancesByDrawer = [];
 			foreach ($entries as &$entry) {
 				$entryDrawerId = (int)$entry['drawer_id'];
-				if ($runningDrawerId !== $entryDrawerId) {
-					$runningDrawerId = $entryDrawerId;
-					$runningBalance = 0.0;
-				}
+				$runningBalance = $runningBalancesByDrawer[$entryDrawerId] ?? 0.0;
 				$entry['balance_before'] = $runningBalance;
 				$runningBalance += (float)$entry['opening'] + (float)$entry['credit'] - (float)$entry['debit'];
 				$entry['balance_after'] = $runningBalance;
+				$runningBalancesByDrawer[$entryDrawerId] = $runningBalance;
 			}
 			unset($entry);
 		}
 		usort($entries, static function (array $a, array $b): int {
-			return strcmp((string)($b['date'] ?? ''), (string)($a['date'] ?? ''));
+			$dateOrder = strcmp((string)($b['date'] ?? ''), (string)($a['date'] ?? ''));
+			if ($dateOrder !== 0) {
+				return $dateOrder;
+			}
+			$aIsSnapshot = in_array(strtolower((string)($a['status'] ?? '')), ['opening snapshot', 'historical summary'], true);
+			$bIsSnapshot = in_array(strtolower((string)($b['status'] ?? '')), ['opening snapshot', 'historical summary'], true);
+			$snapshotOrder = $aIsSnapshot <=> $bIsSnapshot;
+			return $snapshotOrder !== 0
+				? $snapshotOrder
+				: ((int)($b['_sort_id'] ?? 0) <=> (int)($a['_sort_id'] ?? 0));
 		});
 
 		foreach ($entries as $entry) {
