@@ -3,6 +3,17 @@
 <?php else: ?>
 
 <?php
+	require_once plugin_path('helpers/permissions.php');
+	$customerApprovers = [];
+	if (!user_can('is_admin')) {
+		try {
+			$approvalSession = get_session();
+			$approvalDb = new \Core\Database;
+			$customerApprovers = \CashpickupPermissions\eligible_approvers($approvalDb, (int)($approvalSession->id ?? 0));
+		} catch (\Throwable $e) {
+			$customerApprovers = [];
+		}
+	}
 	$prefill = [
 		'full_name' => trim((string)($_GET['full_name'] ?? '')),
 		'phone' => trim((string)($_GET['phone'] ?? '')),
@@ -61,6 +72,23 @@
 					<label class="form-label">Location / Address</label>
 					<input name="location" id="location" type="text" class="form-control" value="<?=esc(old_value('location') ?: $prefill['location'])?>">
 				</div>
+				<?php if (!user_can('is_admin')): ?>
+					<div class="col-md-6">
+						<label class="form-label">Assign approver</label>
+						<select name="approval_assigned_to" class="form-select" required>
+							<option value="">---Select a superior approver---</option>
+							<?php foreach ($customerApprovers as $approver): ?>
+								<?php $approverName = trim($approver->first_name . ' ' . $approver->last_name); ?>
+								<option value="<?=esc((string)$approver->id)?>" <?=((string)old_value('approval_assigned_to') === (string)$approver->id) ? 'selected' : ''?>>
+									<?=esc(($approverName !== '' ? $approverName : ('User #' . $approver->id)) . ' - ' . $approver->role_label)?>
+								</option>
+							<?php endforeach; ?>
+						</select>
+						<?php if (!empty($errors['approval_assigned_to'])): ?>
+							<small class="text-danger"><?=$errors['approval_assigned_to']?></small>
+						<?php endif; ?>
+					</div>
+				<?php endif; ?>
 				<div class="col-12 d-flex justify-content-end">
 					<button type="submit" class="btn btn-primary" id="customerRegisterSubmit">Save</button>
 				</div>

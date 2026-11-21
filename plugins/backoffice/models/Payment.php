@@ -31,6 +31,7 @@ class Payment extends Model
 		'approval_receipt_photo',
 		'approval_receipt_uploaded_at',
 		'transaction_status',
+		'urgency',
 		'reject_reason',
 		'disabled',
 		'deleted',
@@ -59,6 +60,7 @@ class Payment extends Model
 		'approval_receipt_photo',
 		'approval_receipt_uploaded_at',
 		'transaction_status',
+		'urgency',
 		'reject_reason',
 		'disabled',
 		'deleted',
@@ -79,6 +81,10 @@ class Payment extends Model
  			$this->errors['transaction_status'] = 'Activity status is required';
  		}
 
+		if (array_key_exists('urgency', $data) && !in_array($data['urgency'], ['Immediate', 'High', 'Normal', 'Low'], true)) {
+			$this->errors['urgency'] = 'Select a valid urgency level';
+		}
+
  		if(empty($data['amount']) || !is_numeric($data['amount']) || $data['amount'] <= 0)
 		{
 			$this->errors['amount'] = 'Amount must be greater than zero';
@@ -94,6 +100,10 @@ class Payment extends Model
  		if(empty($data['transaction_status']))
 		{
 			$this->errors['transaction_status'] = 'Activity status is required';
+		}
+
+		if (array_key_exists('urgency', $data) && !in_array($data['urgency'], ['Immediate', 'High', 'Normal', 'Low'], true)) {
+			$this->errors['urgency'] = 'Select a valid urgency level';
 		}
 
 		if(empty($data['amount']) || !is_numeric($data['amount']) || $data['amount'] <= 0)

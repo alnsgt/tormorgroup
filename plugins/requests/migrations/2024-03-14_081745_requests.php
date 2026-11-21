@@ -21,6 +21,7 @@ class Requests extends Migration
 		$this->addColumn('amount FLOAT(10,2) DEFAULT 0.00');
 		$this->addColumn('assigned varchar(100) null'); 
 		$this->addColumn('transaction_status varchar(15) null'); 
+		$this->addColumn("urgency varchar(20) not null default 'Normal'");
 		$this->addColumn('created_by varchar(100) null');
 		$this->addColumn('updated_by varchar(100) null');
 		$this->addColumn('disabled tinyint(1) unsigned default 0');

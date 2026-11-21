@@ -92,6 +92,18 @@ if(!$csrf){
 	redirect($admin_route.'/'.$plugin_route.'/customer/'.$customerId);
 }
 
+$approvalAssigneeId = (int)($req->post('approval_assigned_to') ?? 0);
+try {
+	if (!\CashpickupPermissions\is_eligible_approver($db, $actorId, $approvalAssigneeId)) {
+		message_fail('Select a superior role to approve this withdrawal.');
+		redirect($admin_route.'/'.$plugin_route.'/customer/'.$customerId);
+	}
+} catch (\Throwable $e) {
+	error_log('[cashpickup] Withdrawal approver validation failed: ' . $e->getMessage());
+	message_fail('Unable to verify the selected approver.');
+	redirect($admin_route.'/'.$plugin_route.'/customer/'.$customerId);
+}
+
 $transactionStarted = false;
 $insertedIds = [];
 try{
@@ -147,23 +159,7 @@ try{
 	}
 	$amountPaidOut = round($amount - $pickupCharge, 2);
 
-	// Approval workflow: same as add-controller.php
-	$isPrivileged = user_can('is_admin');
-	$isGeneralManager = false;
-	try {
-		$gm = $db->query(
-			"SELECT 1
-			 FROM user_roles_map urm
-			 JOIN user_roles ur ON ur.id = urm.role_id
-			 WHERE urm.disabled = 0
-			 AND urm.user_id = :uid
-			 AND LOWER(ur.role) IN ('general manager','general_manager','generalmanager','gm','is_general_manager')
-			 LIMIT 1",
-			['uid' => $actorId]
-		);
-		$isGeneralManager = !empty($gm);
-	} catch (\Throwable $e) {}
-	$approvalStatus = ($isPrivileged || $isGeneralManager) ? 'approved' : 'pending';
+	$approvalStatus = 'pending';
 
 	// CFA amount is zero unless the customer is paid in CFA.
 	$cfaAmount = 0.0;
@@ -404,6 +400,7 @@ try{
 		'customer_location' => (string)($customer->location ?? ''),
 		'payout_channel' => $paymentMethod === 'transfer_telcos' ? $payoutChannel : ($paymentMethod === 'transfer_bank' ? $accountPaidTo : ''),
 		'assigned_user_id' => $actorId,
+		'approval_assigned_to' => $approvalAssigneeId,
 		'approved_by' => $approvalStatus === 'approved' ? $actorId : null,
 		'approved_at' => $approvalStatus === 'approved' ? $now : null,
 		'confirmed_by' => $confirmedBy,
@@ -468,6 +465,14 @@ try{
 				throw new \RuntimeException('Unable to link the payout to its assigned balance.');
 			}
 		}
+	}
+	if (!\CashpickupActivity\record(
+		'withdrawal submitted',
+		$actorId,
+		'Customer withdrawal #' . (int)($insertData['id'] ?? 0) . ' submitted for ' . number_format($amount, 2, '.', '') . '.',
+		'cashpickups'
+	)) {
+		throw new \RuntimeException('Unable to record the customer withdrawal activity.');
 	}
 	if (!$db->commit()) {
 		throw new \RuntimeException('Unable to complete the customer withdrawal.');
@@ -570,18 +575,17 @@ try{
 		'id' => (int)($insertedIds[0] ?? 0),
 		'created_by' => $actorId,
 		'assigned_user_id' => $actorId,
+		'approval_assigned_to' => $approvalAssigneeId,
 		'sender_details' => trim((string)($customer->full_name ?? '')),
 		'amount_involved' => $amount,
 		'tracking_id' => trim((string)($customer->tracking_id ?? '')),
 		'approval_status' => $approvalStatus,
 		'transaction_status' => $approvalStatus === 'approved' ? 'Approved' : 'Pending approval',
 	];
-	$withdrawalRecipients = \cashpickup_whatsapp_participant_ids($withdrawalNotificationRecord, [$actorId]);
+	$withdrawalNotificationRecord['approval_assigned_to'] = $approvalAssigneeId;
+	$withdrawalRecipients = \cashpickup_whatsapp_participant_ids($withdrawalNotificationRecord, [$actorId, $approvalAssigneeId]);
 	$withdrawalNextAction = 'Review the customer withdrawal and complete any required payout follow-up.';
-	if ($approvalStatus !== 'approved') {
-		$withdrawalRecipients = array_values(array_unique(array_merge($withdrawalRecipients, \cashpickup_whatsapp_approver_ids())));
-		$withdrawalNextAction = 'Review and approve or reject the customer withdrawal.';
-	}
+	$withdrawalNextAction = 'Review and approve or reject the customer withdrawal.';
 	\cashpickup_whatsapp_notify(
 		$withdrawalNotificationRecord,
 		$withdrawalRecipients,
@@ -591,9 +595,7 @@ try{
 		$admin_route.'/'.$plugin_route.'/customer/'.$customerId
 	);
 
-	message_success($approvalStatus === 'approved'
-		? 'Customer payout of GH₵ ' . number_format($amount, 2) . ' recorded.'
-		: 'Customer payout of GH₵ ' . number_format($amount, 2) . ' submitted for approval.');
+	message_success('Customer payout of GH₵ ' . number_format($amount, 2) . ' submitted for approval.');
 	redirect($admin_route.'/'.$plugin_route.'/customer/'.$customerId);
 
 }catch(\Throwable $e){

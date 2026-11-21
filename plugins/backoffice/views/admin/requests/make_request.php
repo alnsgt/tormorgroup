@@ -3,7 +3,7 @@
 		$__errors_session = get_value('errors');
 		$__request_swal_error = '';
 		if (is_array($__errors_session) && !empty($__errors_session)) {
-			foreach (['network', 'request_type', 'amount', 'denos_json', 'denos_json_mismatch', 'assigned', 'description', 'transaction_status', 'usn'] as $__errorKey) {
+			foreach (['network', 'request_type', 'amount', 'denos_json', 'denos_json_mismatch', 'assigned', 'urgency', 'transaction_status', 'usn'] as $__errorKey) {
 				$__candidateError = trim((string)($__errors_session[$__errorKey] ?? ''));
 				if ($__candidateError !== '') {
 					$__request_swal_error = $__candidateError;
@@ -31,6 +31,8 @@
 			font-size: 12px;
 		}
 	</style>
+	<link rel="stylesheet" href="<?=ROOT?>/plugins/backoffice/assets/css/select-badges.css">
+	<script src="<?=ROOT?>/plugins/backoffice/assets/js/select-badges.js"></script>
 	<form method="post" enctype="multipart/form-data">		
 		<div class="row col-md-12 col-md-8 col-lg-6 mx-auto shadow p-2 rounded">
 			
@@ -44,7 +46,7 @@
 	 
 			<div class="col-md-12 ">
 				<label for="network" class="form-label">Request option</label>
-				<select class="form-select" name="network" id="network" onchange="updateRequestOptions()">	
+				<select class="form-select bo-select-badge" name="network" id="network" onchange="updateRequestOptions()">
 				  <option value="">---Select---</option>
 				  <!-- Options will be populated dynamically based on transaction type -->
 				  <option <?=old_select('network','BANK')?> value="BANK">BANK</option>
@@ -59,7 +61,7 @@
 	 
 			<div class="col-md-12 ">
 				<label for="request_type" class="form-label">Request type</label>
-				<select class="form-select request_type" id="request_type" name="request_type">
+				<select class="form-select request_type bo-select-badge" id="request_type" name="request_type">
 					<!-- Options will be displayed dynamically -->
 				 </select>
 				<?php if(!empty($errors['request_type']) && (string)$errors['request_type'] !== $__request_swal_error): ?>
@@ -96,7 +98,7 @@
 
 			<div class="col-md-12  assigned">
 			  <label for="assigned" class="form-label">Assigned to <small>(who is the request going to?):</small></label>
-			  <select class="form-select assigned" name="assigned">
+			  <select class="form-select assigned bo-select-badge" name="assigned">
 				  <option value="">---Select---</option>
 				  <?php if(!empty($users)):?>
 				  	<?php foreach ($users as $user): ?>				  		
@@ -110,16 +112,21 @@
 			</div>
 				
 			<div class="col-md-12">
-			  <label for="description" class="form-label">Description</label>
-				<textarea rows="2" id="description" class="form-control" name="description"  placeholder="Write a brief description for this request: if you are requesting for sims, indicate the quantity you want here. "><?=old_value('description')?></textarea>
-			</div>			
-				<?php if(!empty($errors['description']) && (string)$errors['description'] !== $__request_swal_error):?>
-				  <small class="text-danger"><?=$errors['description']?></small>
-				<?php endif?>
+				<label for="urgency" class="form-label">Urgency</label>
+				<select class="form-select bo-select-badge" name="urgency" id="urgency" required>
+					<?php foreach (backoffice_urgency_options() as $__urgency => $__urgencyDescription): ?>
+						<option <?=old_select('urgency', $__urgency, 'Normal')?> value="<?=esc($__urgency)?>"><?=esc($__urgency)?> - <?=esc($__urgencyDescription)?></option>
+					<?php endforeach; ?>
+				</select>
+				<small class="text-muted">Set the response expectation for the assigned user.</small>
+				<?php if(!empty($errors['urgency'])): ?>
+					<small class="text-danger d-block"><?=esc($errors['urgency'])?></small>
+				<?php endif; ?>
+			</div>
 
 			<div class="col-md-12  transaction_status">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status">
+			  <select class="form-select transaction_status bo-select-badge" name="transaction_status">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 				  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>

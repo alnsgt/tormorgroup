@@ -13,6 +13,8 @@
 	date_default_timezone_set('Africa/Accra');
 
 	$postdata = $req->post();
+	$postdata['description'] = $postdata['description'] ?? '';
+	$postdata['urgency'] = $postdata['urgency'] ?? 'Normal';
 	$payment = new \BackOffices\Payment;
 
 	$csrf = csrf_verify($postdata);
@@ -52,7 +54,7 @@
 
 	if ($csrf && $isReconciliationBulkPayment) {
 		if (!user_can('add_payment')) {
-			$payment->errors['description'] = 'You do not have permission to add payments.';
+			$payment->errors['form'] = 'You do not have permission to add payments.';
 			set_value('errors', $payment->errors);
 			return;
 		}
@@ -162,13 +164,14 @@
 				'drawer_user_id' => $drawerUserId,
 				'denos_json' => '[]',
 				'transaction_status' => 'Pending',
+				'urgency' => 'Normal',
 				'created_by' => $user_id,
 				'date_created' => $now,
 			];
 			$payment = new \BackOffices\Payment;
 			$payment->insert($rowData);
 			if (!empty($payment->has_error) || !empty($payment->error)) {
-				$payment->errors['description'] = 'Failed to create payment for ' . $channel . '. ' . ($payment->error ?? '');
+				$payment->errors['form'] = 'Failed to create payment for ' . $channel . '. ' . ($payment->error ?? '');
 				set_value('old_post', $postdata);
 				set_value('mp_restore', 1);
 				set_value('errors', $payment->errors);
@@ -399,8 +402,8 @@
 					'details' => [
 						'Network' => $postdata['network'] ?? '',
 						'Payment type' => $postdata['payment_type'] ?? '',
+						'Urgency' => ($postdata['urgency'] ?? 'Normal') . ' - ' . backoffice_urgency_description((string)($postdata['urgency'] ?? 'Normal')),
 						'Amount' => 'GHS ' . number_format($amountValue, 2),
-						'Description' => $postdata['description'] ?? '',
 					],
 					'view_url' => ROOT . '/admin/back_office/view_payment/' . (int)($postdata['id'] ?? 0),
 				]);
@@ -442,7 +445,7 @@
 	}
 
 	if(!$csrf)
-		$payment->errors['description'] = "Form expired!";
+		$payment->errors['form'] = "Form expired!";
 
 	if (!empty($postdata)) {
 		set_value('old_post', $postdata);

@@ -158,6 +158,11 @@ if ($csrf)
 			}
 		}
 
+		\CashpickupActivity\record(
+			'deleted',
+			$userId,
+			'Cashpickup transaction #' . (int)($row->id ?? 0) . ' deleted.'
+		);
 		message_success('Cash pickup deleted successfully!');
 		redirect($admin_route.'/'.$plugin_route);
 	}

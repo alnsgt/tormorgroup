@@ -14,11 +14,21 @@
 	$approvalStatus = strtolower(trim((string)($row->approval_status ?? 'pending')));
 	if ($approvalStatus === '') $approvalStatus = 'pending';
 	$cancelStatuses = $approvalStatus . ' ' . strtolower(trim((string)($row->transaction_status ?? '')));
+	$isCancelledCashpickup = preg_match('/cancelled|canceled/i', $cancelStatuses) === 1;
 	$canCancelCashpickup = !$isModal && user_can('is_admin')
-		&& preg_match('/denied|deny|rejected|reject|declined|decline|cancelled|canceled/i', $cancelStatuses) !== 1;
+		&& !$isCancelledCashpickup
+		&& preg_match('/denied|deny|rejected|reject|declined|decline/i', $cancelStatuses) !== 1;
+	$canRepairCashpickup = !$isModal
+		&& user_can('is_admin')
+		&& $isCancelledCashpickup
+		&& strtolower(trim((string)($row->source ?? ''))) !== 'customer_transfer'
+		&& strtolower(trim((string)($row->payment_method ?? ''))) !== 'customer_transfer'
+		&& !($side === 'receive' && strtolower(trim((string)($row->source ?? ''))) === 'credit')
+		&& (!empty($row->approved_at) || (int)($row->approved_by ?? 0) > 0);
 	$displayApprovalStatus = $approvalStatus;
 	$displayApprovalText = ucfirst($approvalStatus);
 	$approvedByName = '';
+	$approvalAssigneeName = '';
 	$denosRaw = $row->denos_json ?? '';
 	$denos = [];
 	if (is_string($denosRaw) && trim($denosRaw) !== '') {
@@ -29,6 +39,8 @@
 	}
 	$session = get_session();
 	$user_id = (int)($session->id ?? 0);
+	$approvalAssigneeId = (int)($row->approval_assigned_to ?? 0);
+	$isAssignedApprover = $approvalAssigneeId > 0 && $approvalAssigneeId === $user_id;
 	require_once plugin_path('helpers/customer-ledger.php');
 	$transferHelperPath = realpath(__DIR__ . '/../../helpers/transfer-allocation.php');
 	if ($transferHelperPath && file_exists($transferHelperPath)) {
@@ -55,7 +67,9 @@
 				}
 			}
 		}
-	} catch (\Throwable $e) {}
+	} catch (\Throwable $e) {
+		error_log('[cashpickup] Unable to load transaction approver roles: ' . $e->getMessage());
+	}
 	$isGeneralManager = !empty(array_intersect($roleNames, ['general manager', 'general_manager', 'generalmanager', 'gm', 'is_general_manager']));
 	$isOperationsManager = !empty(array_intersect($roleNames, ['operations manager', 'operations_manager', 'operationsmanager', 'ops manager', 'ops_manager', 'opsmanager', 'is_operations_manager']));
 	$canApproveDeny = (user_can('is_admin')
@@ -63,9 +77,12 @@
 		|| user_can('is_operations_manager')
 		|| $isGeneralManager
 		|| $isOperationsManager);
+	$isPendingApprovalTask = in_array($approvalStatus, ['pending', 'draft'], true)
+		|| str_starts_with(strtolower(trim((string)($row->transaction_status ?? ''))), 'pending');
 	$canApproveCashpickup = !$isModal
 		&& $canApproveDeny
-		&& $approvalStatus === 'pending'
+		&& ($isAssignedApprover || ($approvalAssigneeId <= 0 && $isPendingApprovalTask))
+		&& in_array($approvalStatus, ['pending', 'draft'], true)
 		&& !$isCreditPayout
 		&& preg_match('/denied|deny|rejected|reject|declined|decline|cancelled|canceled|reversed/i', $cancelStatuses) !== 1;
 	$canRejectCashpickup = $canApproveCashpickup;
@@ -261,6 +278,18 @@
 				$assignedName = trim(($assignedRow[0]->first_name ?? '').' '.($assignedRow[0]->last_name ?? ''));
 			}
 		}
+		if ($approvalAssigneeId > 0) {
+			$approvalAssigneeRow = $dbP->query(
+				"SELECT first_name, last_name FROM users WHERE deleted = 0 AND id = :id LIMIT 1",
+				['id' => $approvalAssigneeId]
+			);
+			if (!empty($approvalAssigneeRow)) {
+				$approvalAssigneeName = trim(($approvalAssigneeRow[0]->first_name ?? '') . ' ' . ($approvalAssigneeRow[0]->last_name ?? ''));
+			}
+			if ($approvalAssigneeName === '') {
+				$approvalAssigneeName = 'User #' . $approvalAssigneeId;
+			}
+		}
 		$approvedById = (int)($row->approved_by ?? 0);
 		if ($approvedById > 0) {
 			$abRow = $dbP->query("SELECT first_name, last_name FROM users WHERE deleted = 0 AND id = :id LIMIT 1", ['id' => $approvedById]);
@@ -268,7 +297,9 @@
 			$approvedByName = trim(($abRow[0]->first_name ?? '').' '.($abRow[0]->last_name ?? ''));
 			}
 		}
-	} catch (\Throwable $e) {}
+	} catch (\Throwable $e) {
+		error_log('[cashpickup] Unable to load transaction participant names: ' . $e->getMessage());
+	}
 	if ($side === 'pay') {
 		$pm = strtolower(trim((string)($row->payment_method ?? '')));
 		if ($pm === 'cash') {
@@ -401,7 +432,7 @@
 			$transferMatchSqlAlias = 't.receive_id IN (' . implode(',', $transferPlaceholders) . ')';
 			$paidGrossExpr = "(COALESCE(amount_paid_out,0) + COALESCE(pickup_charge,0))";
 			$payouts = $dbP->query(
-				"SELECT id, date_created, amount_requested, pickup_charge, amount_paid_out, amount_transferred, payment_method, confirmed_by, approval_status, transaction_status, denial_reason
+				"SELECT id, date_created, amount_requested, pickup_charge, amount_paid_out, amount_transferred, payment_method, confirmed_by, approval_status, approval_assigned_to, transaction_status, denial_reason
 				 FROM cashpickups
 				 WHERE (deleted IS NULL OR deleted = 0)
 				 AND LOWER(transaction_side) = 'pay'
@@ -619,6 +650,24 @@
 	}
 ?>
 
+<style>
+	.cashpickup-view-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:.5rem}
+	.cashpickup-view-actions form{margin:0}
+	.cashpickup-view-export{width:2.75rem;min-width:2.75rem;text-align:center}
+	@media(max-width:991.98px){
+		.cashpickup-view-actions{justify-content:flex-start;width:100%;padding-top:.25rem}
+		.cashpickup-view-actions>.btn,
+		.cashpickup-view-actions>form>.btn{min-height:2.75rem;max-width:100%}
+		.cashpickup-view-actions>form{display:flex;min-width:0}
+	}
+	@media(max-width:575.98px){
+		.cashpickup-view-actions>.btn:not(.cashpickup-view-export),
+		.cashpickup-view-actions>form{flex:1 1 calc(50% - .5rem);min-width:0}
+		.cashpickup-view-actions>.btn:not(.cashpickup-view-export),
+		.cashpickup-view-actions>form>.btn{width:100%;white-space:normal}
+		.cashpickup-view-actions>.cashpickup-view-export{flex:0 0 2.75rem}
+	}
+</style>
 <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
 	<div>
 		<div class="d-flex align-items-center gap-2">
@@ -627,7 +676,7 @@
 		</div>
 		<div class="text-muted small">#<?=esc($row->id)?> | <?=esc((string)($row->date_created ?? $row->date ?? ''))?></div>
 	</div>
-	<div class="d-flex gap-2">
+	<div class="cashpickup-view-actions">
 	<?php if(!$isModal && $side === 'receive' && (int)($row->created_by ?? 0) === $user_id && (int)($row->assigned_user_id ?? 0) > 0): ?>
 		<?php
 			$assignmentWhatsAppLink = \cashpickup_whatsapp_assignment_link(
@@ -667,10 +716,19 @@
 			<i class="fa fa-ban me-1" aria-hidden="true"></i> Cancel transaction
 		</button>
 	<?php endif; ?>
+	<?php if($canRepairCashpickup): ?>
+		<form method="post" action="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/cancel/<?=esc((string)($row->id ?? 0))?>" class="d-inline">
+			<?=csrf()?>
+			<input type="hidden" name="repair_cashdrawer" value="1">
+			<button class="btn btn-outline-warning" type="submit">
+				<i class="fa-solid fa-rotate-left me-1" aria-hidden="true"></i> Verify cashdrawer reversal
+			</button>
+		</form>
+	<?php endif; ?>
 	<?php if(!$isModal): ?>
-		<a class="btn btn-outline-secondary" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => 'view', 'id' => (int)($row->id ?? 0), 'format' => 'pdf'])?>">PDF</a>
-		<a class="btn btn-outline-success" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => 'view', 'id' => (int)($row->id ?? 0), 'format' => 'xlsx'])?>">Excel</a>
-		<a class="btn btn-outline-primary" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => 'view', 'id' => (int)($row->id ?? 0), 'format' => 'csv'])?>">CSV</a>
+		<a class="btn btn-outline-secondary cashpickup-view-export" title="Export PDF" aria-label="Export PDF" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => 'view', 'id' => (int)($row->id ?? 0), 'format' => 'pdf'])?>"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i></a>
+		<a class="btn btn-outline-success cashpickup-view-export" title="Export Excel" aria-label="Export Excel" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => 'view', 'id' => (int)($row->id ?? 0), 'format' => 'xlsx'])?>"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></a>
+		<a class="btn btn-outline-primary cashpickup-view-export" title="Export CSV" aria-label="Export CSV" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => 'view', 'id' => (int)($row->id ?? 0), 'format' => 'csv'])?>"><i class="fa-solid fa-file-csv" aria-hidden="true"></i></a>
 	<?php endif; ?>
 	<a class="btn btn-outline-secondary" href="<?=esc($backUrl)?>"><i class="fa fa-chevron-left"></i> Back</a>
 	<?php if(!$isModal && $canEditCashpickup && !in_array($approvalStatus, ['denied','reversed'], true) && !($side === 'receive' && $fullyPaid)): ?>
@@ -1171,7 +1229,14 @@
 											>Open</button>
 										</td>
 										<td class="text-end">
-											<?php if($canApproveDeny && $pApproval === 'pending'): ?>
+											<?php
+												$payoutApproverId = (int)($p->approval_assigned_to ?? 0);
+												$canApprovePayout = $canApproveDeny
+													&& $pApproval === 'pending'
+													&& $payoutApproverId > 0
+													&& $payoutApproverId === $user_id;
+											?>
+											<?php if($canApprovePayout): ?>
 												<form method="post" action="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/approve/<?=esc($p->id)?>" class="d-inline">
 													<?=$csrfField?>
 													<button class="btn btn-sm btn-success" type="submit" title="Approve"><i class="fa fa-check"></i></button>
@@ -1383,6 +1448,12 @@
 				<div class="text-muted">Assigned to</div>
 				<div class="fw-semibold text-end"><?=esc($assignedName !== '' ? $assignedName : ((string)($row->assigned_user_id ?? '---')))?></div>
 			</div>
+			<?php if($approvalAssigneeName !== ''): ?>
+				<div class="d-flex align-items-center justify-content-between py-1">
+					<div class="text-muted">Approver</div>
+					<div class="fw-semibold text-end"><?=esc($approvalAssigneeName)?></div>
+				</div>
+			<?php endif; ?>
 			<div class="d-flex align-items-center justify-content-between py-1">
 				<div class="text-muted">Original source</div>
 				<div class="fw-semibold text-end"><?=esc($originalSourceLabel !== '' ? $originalSourceLabel : ((string)($row->source ?? '')))?></div>

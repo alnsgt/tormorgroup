@@ -139,6 +139,7 @@ function ensure_cashpickup_customer_schema(Database $db): void
 
 function ensure_cashpickup_customer_approval_columns(Database $db): void
 {
+	ensure_cashpickup_approval_assignee_columns($db);
 	static $checked = false;
 	if ($checked) {
 		return;
@@ -155,6 +156,7 @@ function ensure_cashpickup_customer_approval_columns(Database $db): void
 		'approved_by' => 'INT unsigned NULL',
 		'approved_at' => 'datetime default null',
 		'denial_reason' => 'TEXT NULL',
+		'approval_assigned_to' => 'INT unsigned NULL',
 	];
 	$ok = true;
 	foreach ($cols as $col => $type) {
@@ -190,6 +192,7 @@ function ensure_cashpickup_customer_approval_columns(Database $db): void
 
 function ensure_cashpickup_columns(Database $db): void
 {
+	ensure_cashpickup_approval_assignee_columns($db);
 	static $checked = false;
 	if ($checked) {
 		return;
@@ -217,6 +220,7 @@ function ensure_cashpickup_columns(Database $db): void
 		'amount_transferred' => 'FLOAT(10,2) DEFAULT 0.00',
 		'denos_json' => 'LONGTEXT NULL',
 		'assigned_user_id' => 'INT unsigned NULL',
+		'approval_assigned_to' => 'INT unsigned NULL',
 		'approved_by' => 'INT unsigned NULL',
 		'approved_at' => 'datetime default null',
 		'receive_id' => 'BIGINT unsigned NULL',
@@ -275,6 +279,41 @@ function ensure_cashpickup_columns(Database $db): void
 	if ($ok) {
 		ensure_cashpickup_performance_indexes($db);
 		write_runtime_marker($marker);
+	}
+}
+
+function ensure_cashpickup_approval_assignee_columns(Database $db): void
+{
+	static $checkedTables = [];
+
+	foreach ([
+		'cashpickups' => 'INT unsigned NULL',
+		'cashpickup_customers' => 'INT unsigned NULL',
+	] as $tableName => $definition) {
+		if (!empty($checkedTables[$tableName])) {
+			continue;
+		}
+		if (!$db->table_exists([$tableName])) {
+			continue;
+		}
+		$column = $db->query(
+			"SELECT COLUMN_NAME
+			 FROM INFORMATION_SCHEMA.COLUMNS
+			 WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :table_name
+			 AND COLUMN_NAME = 'approval_assigned_to'
+			 LIMIT 1",
+			['db' => DB_NAME, 'table_name' => $tableName]
+		);
+		if ($db->has_error) {
+			throw new \RuntimeException('Unable to verify Cashpickup approval assignment storage.');
+		}
+		if (empty($column)) {
+			$db->query("ALTER TABLE {$tableName} ADD COLUMN approval_assigned_to {$definition}");
+			if ($db->has_error) {
+				throw new \RuntimeException('Unable to prepare Cashpickup approval assignment storage.');
+			}
+		}
+		$checkedTables[$tableName] = true;
 	}
 }
 
@@ -542,6 +581,7 @@ function upsert_customer(array $payload, int $actorId, ?Database $db = null, arr
 		$approvalStatus = 'approved';
 	}
 	$approvedBy = (int)($options['approved_by'] ?? 0);
+	$approvalAssignedTo = (int)($options['approval_assigned_to'] ?? 0);
 
 	if ($phone === '' && $idNumber === '') {
 		return null;
@@ -589,6 +629,10 @@ function upsert_customer(array $payload, int $actorId, ?Database $db = null, arr
 			$updates[] = 'denial_reason = NULL';
 			$params['approval_status'] = 'pending';
 		}
+		if ($approvalStatus === 'pending' && $existingStatus !== 'approved') {
+			$updates[] = 'approval_assigned_to = :approval_assigned_to';
+			$params['approval_assigned_to'] = $approvalAssignedTo > 0 ? $approvalAssignedTo : null;
+		}
 		if (!empty($updates)) {
 			$updates[] = 'updated_by = :updated_by';
 			$updates[] = 'date_updated = :date_updated';
@@ -632,8 +676,8 @@ function upsert_customer(array $payload, int $actorId, ?Database $db = null, arr
 		throw new \RuntimeException('Unable to generate a unique customer ID.');
 	}
 	$db->query(
-		"INSERT INTO cashpickup_customers (id, full_name, phone_number, id_type, id_number, location, created_by, date_created, approval_status, approved_by, approved_at)
-		 VALUES (:id, :full_name, :phone_number, :id_type, :id_number, :location, :created_by, :date_created, :approval_status, :approved_by, :approved_at)",
+		"INSERT INTO cashpickup_customers (id, full_name, phone_number, id_type, id_number, location, created_by, date_created, approval_status, approved_by, approved_at, approval_assigned_to)
+		 VALUES (:id, :full_name, :phone_number, :id_type, :id_number, :location, :created_by, :date_created, :approval_status, :approved_by, :approved_at, :approval_assigned_to)",
 		[
 			'id' => $newId,
 			'full_name' => $fullName !== '' ? $fullName : null,
@@ -646,6 +690,7 @@ function upsert_customer(array $payload, int $actorId, ?Database $db = null, arr
 			'approval_status' => $approvalStatus,
 			'approved_by' => $approvalStatus === 'approved' && $approvedBy > 0 ? $approvedBy : null,
 			'approved_at' => $approvalStatus === 'approved' ? $now : null,
+			'approval_assigned_to' => $approvalStatus === 'pending' && $approvalAssignedTo > 0 ? $approvalAssignedTo : null,
 		]
 	);
 	if ($db->has_error) {
@@ -1298,6 +1343,8 @@ function statement_received_amount_sql(string $alias = ''): string
 	return "(CASE
 		WHEN LOWER(TRIM(COALESCE({$prefix}transaction_side,''))) = 'receive'
 			AND " . normalized_cashpickup_credit_mode_sql($alias) . " <> 'credit'
+			AND LOWER(TRIM(COALESCE({$prefix}transaction_status,''))) NOT IN ('cancelled','canceled','denied','rejected')
+			AND LOWER(TRIM(COALESCE({$prefix}approval_status,''))) NOT IN ('cancelled','canceled','denied','rejected')
 		THEN COALESCE({$prefix}amount_involved,0)
 		ELSE 0
 	END)";
@@ -1394,11 +1441,20 @@ function fetch_customer_statement(Database $db, int $customerId): array
 			c.payment_method,
 			c.sender_details,
 			c.phone_number,
+			COALESCE(
+				NULLIF(TRIM(CONCAT_WS(' ', NULLIF(approval_user.first_name,''), NULLIF(approval_user.last_name,''))), ''),
+				CASE WHEN COALESCE(c.approval_assigned_to, 0) > 0
+					THEN CONCAT('User #', c.approval_assigned_to)
+					ELSE ''
+				END
+			) AS approval_assignee_name,
 			{$receivedSql} AS received_amount,
 			{$payoutSql} AS payout_amount,
 			{$creditIssuedSql} AS credit_amount,
 			{$creditRepaymentSql} AS credit_repayment_amount
 		 FROM cashpickups c
+		 LEFT JOIN users approval_user
+			ON approval_user.id = c.approval_assigned_to
 		 WHERE (c.deleted IS NULL OR c.deleted = 0)
 		 AND {$currentMatchSql}
 		 AND {$currentWhereSql}
@@ -1475,7 +1531,7 @@ function fetch_customer_statement_page(Database $db, int $customerId, array $fil
 	$idNumber = trim((string)($customer->id_number ?? ''));
 	$order = strtolower(trim((string)($filters['order'] ?? 'desc'))) === 'asc' ? 'ASC' : 'DESC';
 	list($whereSql, $params) = build_customer_statement_where($filters, $customerId, $phone, $idNumber, 'm', 'cust_stmt');
-	list($runningWhereSql, $runningParams) = build_customer_statement_where($filters, $customerId, $phone, $idNumber, 'gl', 'cust_stmt_running');
+	list($runningWhereSql, $runningParams) = build_customer_statement_where([], $customerId, $phone, $idNumber, 'gl', 'cust_stmt_running');
 
 	$countRows = $db->query(
 		"SELECT COUNT(*) AS c
@@ -1505,11 +1561,20 @@ function fetch_customer_statement_page(Database $db, int $customerId, array $fil
 			m.payment_method,
 			m.sender_details,
 			m.phone_number,
+			COALESCE(
+				NULLIF(TRIM(CONCAT_WS(' ', NULLIF(approval_user.first_name,''), NULLIF(approval_user.last_name,''))), ''),
+				CASE WHEN COALESCE(m.approval_assigned_to, 0) > 0
+					THEN CONCAT('User #', m.approval_assigned_to)
+					ELSE ''
+				END
+			) AS approval_assignee_name,
 			{$receivedSql} AS received_amount,
 			{$payoutSql} AS payout_amount,
 			{$creditIssuedSql} AS credit_amount,
 			{$creditRepaymentSql} AS credit_repayment_amount
 		 FROM cashpickups m
+		 LEFT JOIN users approval_user
+			ON approval_user.id = m.approval_assigned_to
 		 {$whereSql}
 		 ORDER BY m.id {$order}
 		 {$limitSql}",
@@ -1517,8 +1582,18 @@ function fetch_customer_statement_page(Database $db, int $customerId, array $fil
 	) ?: [];
 
 	if (!empty($rows)) {
+		$oldestRow = $order === 'ASC' ? $rows[0] : $rows[count($rows) - 1];
+		$prefixParams = $runningParams;
+		$prefixParams['balance_id'] = (int)($oldestRow->id ?? 0);
+		$prefixRows = $db->query(
+			"SELECT COALESCE(SUM({$runningDeltaSql}),0) AS balance_amount
+			 FROM cashpickups gl
+			 {$runningWhereSql}
+			 AND gl.id < :balance_id",
+			$prefixParams
+		) ?: [];
+		$runningBalance = (float)($prefixRows[0]->balance_amount ?? 0);
 		if ($order === 'ASC') {
-			$runningBalance = 0.0;
 			foreach ($rows as $row) {
 				$runningBalance += (float)($row->received_amount ?? 0)
 					- (float)($row->payout_amount ?? 0)
@@ -1526,17 +1601,6 @@ function fetch_customer_statement_page(Database $db, int $customerId, array $fil
 				$row->balance_amount = round($runningBalance, 2);
 			}
 		} else {
-			$oldestRow = $rows[count($rows) - 1];
-			$prefixParams = $runningParams;
-			$prefixParams['balance_id'] = (int)($oldestRow->id ?? 0);
-			$prefixRows = $db->query(
-				"SELECT COALESCE(SUM({$runningDeltaSql}),0) AS balance_amount
-				 FROM cashpickups gl
-				 {$runningWhereSql}
-				 AND gl.id < :balance_id",
-				$prefixParams
-			) ?: [];
-			$runningBalance = (float)($prefixRows[0]->balance_amount ?? 0);
 			for ($idx = count($rows) - 1; $idx >= 0; $idx--) {
 				$runningBalance += (float)($rows[$idx]->received_amount ?? 0)
 					- (float)($rows[$idx]->payout_amount ?? 0)
@@ -1581,12 +1645,15 @@ function fetch_customer_workstation_activity(Database $db, int $customerId, arra
 		             ELSE '' END AS transfer_from_customer_name,
 		        CASE WHEN COALESCE(m.ledger_transfer_to_customer_id, 0) > 0
 		             THEN COALESCE(NULLIF(TRIM(transfer_to.full_name), ''), CONCAT('Customer #', m.ledger_transfer_to_customer_id))
-		             ELSE '' END AS transfer_to_customer_name
+		             ELSE '' END AS transfer_to_customer_name,
+		        TRIM(CONCAT_WS(' ', NULLIF(approval_user.first_name,''), NULLIF(approval_user.last_name,''))) AS approval_assignee_name
 		 FROM cashpickups m
 		 LEFT JOIN cashpickup_customers transfer_from
 		 	ON transfer_from.id = m.ledger_transfer_from_customer_id
 		 LEFT JOIN cashpickup_customers transfer_to
 		 	ON transfer_to.id = m.ledger_transfer_to_customer_id
+		 LEFT JOIN users approval_user
+			ON approval_user.id = m.approval_assigned_to
 		 WHERE (m.deleted IS NULL OR m.deleted = 0)
 		 AND {$matchSql}
 		 ORDER BY m.date_created ASC, m.id ASC",
@@ -1600,9 +1667,11 @@ function fetch_customer_workstation_activity(Database $db, int $customerId, arra
 		$creditMode = strtolower(trim((string)($transaction->credit_mode ?? ''))) === 'credit';
 		$transactionStatus = strtolower(trim((string)($transaction->transaction_status ?? '')));
 		$approvalStatus = strtolower(trim((string)($transaction->approval_status ?? '')));
+		$isTerminalTransaction = in_array($transactionStatus, ['cancelled', 'canceled', 'denied', 'rejected'], true)
+			|| in_array($approvalStatus, ['cancelled', 'canceled', 'denied', 'rejected'], true);
 		$isActiveCredit = in_array($transactionStatus, ['approved', 'pending payout'], true)
 			&& ($approvalStatus === '' || in_array($approvalStatus, ['approved', 'pending'], true));
-		$receivedAmount = (!$creditMode && $side === 'receive')
+		$receivedAmount = (!$isTerminalTransaction && !$creditMode && $side === 'receive')
 			? (float)($transaction->amount_involved ?? 0)
 			: 0.0;
 		$payoutAmount = 0.0;
@@ -1636,6 +1705,11 @@ function fetch_customer_workstation_activity(Database $db, int $customerId, arra
 			'phone_number' => (string)($transaction->phone_number ?? ''),
 			'tracking_id' => (string)($transaction->tracking_id ?? ''),
 			'approval_status' => (string)($transaction->approval_status ?? ''),
+			'approval_assigned_to' => (int)($transaction->approval_assigned_to ?? 0),
+			'approval_assignee_name' => trim((string)($transaction->approval_assignee_name ?? ''))
+				?: ((int)($transaction->approval_assigned_to ?? 0) > 0
+					? 'User #' . (int)$transaction->approval_assigned_to
+					: ''),
 			'transaction_status' => (string)($transaction->transaction_status ?? ''),
 			'received_amount' => round($receivedAmount, 2),
 			'payout_amount' => round($payoutAmount, 2),
@@ -1812,12 +1886,7 @@ function fetch_general_ledger_metrics(Database $db, array $filters = []): array
 
 	$rows = $db->query(
 		"SELECT
-			COALESCE(SUM(CASE
-				WHEN LOWER(TRIM(COALESCE(m.transaction_side,''))) = 'receive'
-					AND LOWER(TRIM(COALESCE(m.credit_mode,''))) <> 'credit'
-				THEN COALESCE(m.amount_involved,0)
-				ELSE 0
-			END),0) AS total_received,
+			COALESCE(SUM(" . statement_received_amount_sql('m') . "),0) AS total_received,
 			COALESCE(SUM(CASE
 				WHEN LOWER(TRIM(COALESCE(m.transaction_side,''))) = 'pay'
 					AND LOWER(TRIM(COALESCE(m.transaction_status,''))) = 'approved'
@@ -1869,6 +1938,7 @@ function fetch_customer_grouped_ledger(Database $db, int $customerId): array
 	$where = "WHERE m.deleted = 0
 		AND LOWER(m.transaction_side) = 'receive'
 		AND {$matchSql}";
+	$groupReceivedSql = statement_received_amount_sql('m');
 	$trackingGroupExpr = "CASE WHEN COALESCE(m.tracking_id,'') <> '' THEN m.tracking_id ELSE CONCAT('cashpickup-', m.id) END";
 
 	$rows = $db->query(
@@ -1885,12 +1955,7 @@ function fetch_customer_grouped_ledger(Database $db, int $customerId): array
 		 FROM (
 			SELECT MAX(m.id) AS row_id,
 			       {$trackingGroupExpr} AS tracking_group,
-			       COALESCE(SUM(
-			       	CASE
-						WHEN " . normalized_cashpickup_credit_mode_sql('m') . " = 'credit' THEN 0
-			       		ELSE COALESCE(m.amount_involved,0)
-			       	END
-			       ),0) AS group_received,
+			       COALESCE(SUM({$groupReceivedSql}),0) AS group_received,
 			       COUNT(*) AS receive_parts
 			FROM cashpickups AS m
 			{$where}

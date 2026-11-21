@@ -21,6 +21,7 @@ class Payments_backoffice extends Migration
 		$this->addColumn('receiving_wallet varchar(50) null');
 		$this->addColumn('amount FLOAT(10,2) DEFAULT 0.00');
 		$this->addColumn('transaction_status varchar(50) null');
+		$this->addColumn("urgency varchar(20) not null default 'Normal'");
 		$this->addColumn('created_by varchar(100) null');
 		$this->addColumn('updated_by varchar(100) null');
 		$this->addColumn('disabled tinyint(1) unsigned default 0');

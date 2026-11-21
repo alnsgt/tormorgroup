@@ -1,6 +1,7 @@
 <?php
 
 require_once plugin_path('helpers/customer-ledger.php');
+require_once plugin_path('helpers/permissions.php');
 $transferHelperPath = realpath(__DIR__ . '/../helpers/transfer-allocation.php');
 if ($transferHelperPath && file_exists($transferHelperPath)) {
 	require_once $transferHelperPath;
@@ -9,8 +10,18 @@ if ($transferHelperPath && file_exists($transferHelperPath)) {
 $cashpickup = new \Cashpickups\Cashpickup;
 $postdata = $req->post();
 $customerId = (int)($postdata['customer_id'] ?? URL(3) ?? 0);
+$session = get_session();
+$creatorId = (int)($session->id ?? 0);
 
-if (!(user_can('is_admin') || user_can('is_manager'))) {
+try {
+	$dbAccess = new \Core\Database;
+	$canCreateCreditPayout = \CashpickupPermissions\can_assign_customer_payout($dbAccess, $creatorId);
+} catch (\Throwable $e) {
+	$cashpickup->errors['credit_amount'] = 'Unable to verify access.';
+	set_value('errors', $cashpickup->errors);
+	return;
+}
+if (!$canCreateCreditPayout) {
 	$cashpickup->errors['credit_amount'] = 'Access denied.';
 	set_value('errors', $cashpickup->errors);
 	return;
@@ -54,9 +65,10 @@ if (!$csrf) {
 	return;
 }
 
-$session = get_session();
 $userId = (int)($session->id ?? 0);
 $assignToUserId = (int)($postdata['assign_to_user_id'] ?? 0);
+$approvalAssigneeId = (int)($postdata['approval_assigned_to'] ?? 0);
+$isAdminCreator = user_can('is_admin');
 $creditAmount = (float)($postdata['credit_amount'] ?? 0);
 $pickupCharge = (float)($postdata['pickup_charge'] ?? 0);
 $notes = trim((string)($postdata['notes'] ?? ''));
@@ -69,6 +81,15 @@ if ($pickupCharge < 0) {
 }
 if ($assignToUserId <= 0) {
 	$cashpickup->errors['assign_to_user_id'] = 'Please select a user to assign.';
+}
+if (!$isAdminCreator) {
+	try {
+		if (!\CashpickupPermissions\is_eligible_approver($db, $creatorId, $approvalAssigneeId, true)) {
+			$cashpickup->errors['approval_assigned_to'] = 'Select an admin to acknowledge this credit payout.';
+		}
+	} catch (\Throwable $e) {
+		$cashpickup->errors['approval_assigned_to'] = 'Unable to verify the selected admin.';
+	}
 }
 
 if (!empty($cashpickup->errors)) {
@@ -93,7 +114,9 @@ $eligibleAssignee = $db->query(
 		WHERE urm.disabled = 0
 		AND LOWER(ur.role) IN (
 			'manager','admin','is_manager','is_admin',
-			'general manager','general_manager','generalmanager','gm','is_general_manager'
+			'general manager','general_manager','generalmanager','gm','is_general_manager',
+			'operations manager','operations_manager','operationsmanager',
+			'ops manager','ops_manager','opsmanager','is_operations_manager'
 		)
 	 ) blocked_roles ON blocked_roles.user_id = u.id
 	 WHERE u.deleted = 0
@@ -173,6 +196,7 @@ $record = [
 	'credit_mode' => 'credit',
 	'payout_channel' => null,
 	'assigned_user_id' => $assignToUserId,
+	'approval_assigned_to' => !$isAdminCreator ? $approvalAssigneeId : null,
 	'transfer_mode' => null,
 	'transfer_channel' => null,
 	'transfer_bank' => null,
@@ -256,9 +280,15 @@ $creditNotificationRecord = [
 	'approval_status' => 'approved',
 	'transaction_status' => 'Pending payout',
 ];
+\CashpickupActivity\record(
+	'assigned',
+	$userId,
+	'Credit payout #' . $creditReceiveId . ' assigned to user #' . $assignToUserId . ' for ' . number_format($grossAmount, 2, '.', '') . '.',
+	'cashpickup_transfers'
+);
 \cashpickup_whatsapp_notify(
 	$creditNotificationRecord,
-	\cashpickup_whatsapp_participant_ids($creditNotificationRecord, [$userId, $assignToUserId]),
+	\cashpickup_whatsapp_participant_ids($creditNotificationRecord, [$userId, $assignToUserId, $approvalAssigneeId]),
 	'credit payout creator and assigned agent',
 	'CREDIT PAYOUT ASSIGNED',
 	'Contact the customer and complete the assigned credit payout.',

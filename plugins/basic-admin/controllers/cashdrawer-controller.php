@@ -2260,6 +2260,8 @@ try {
 
                                     <th style='padding: 8px; text-align: right; color: var(--bs-body-color); font-weight: 600;'>Closing</th>
 
+                                    <th style='padding: 8px; color: var(--bs-body-color); font-weight: 600;'>Statement</th>
+
                                 </tr>
 
                             </thead>
@@ -2273,6 +2275,10 @@ try {
                     $rowClass = $isCfaCash ? 'cashdrawer-channel-row--cfa' : 'cashdrawer-channel-row--ghs';
                     $badgeClass = $isCfaCash ? 'cashdrawer-channel-badge--cfa' : 'cashdrawer-channel-badge--ghs';
                     $label = esc($currencyLabel);
+                    $statementKey = (string)($ch->channel_key ?? '');
+                    $statementQuery = 'channel_type=cash&amp;channel_key=' . rawurlencode($statementKey);
+                    $statementBase = ROOT . '/admin/operations_accounts/';
+                    $statementActions = "<div class='cashdrawer-statement-actions'><a class='btn btn-sm btn-outline-primary' href='{$statementBase}view_channel_statement/{$drawerId}?{$statementQuery}'><i class='fa fa-eye' aria-hidden='true'></i> View</a><a class='btn btn-sm btn-outline-danger' href='{$statementBase}export_channel_statement_pdf/{$drawerId}?{$statementQuery}' target='_blank' rel='noopener'><i class='fa fa-file-pdf' aria-hidden='true'></i> PDF</a></div>";
 
                     $html .= "<tr class='cashdrawer-channel-row {$rowClass}' style='border-bottom: 1px solid var(--bs-border-color);'>
 
@@ -2285,6 +2291,8 @@ try {
                                 <td data-label='Out' style='padding: 8px; text-align: right; color: var(--bs-danger); font-weight: 600;'>-" . $currencyLabel . " " . number_format($ch->debit ?? 0, 2) . "</td>
 
                                 <td data-label='Closing' style='padding: 8px; text-align: right; color: var(--bs-body-color); font-weight: 700;'>" . $currencyLabel . " " . number_format($ch->closing_balance ?? 0, 2) . "</td>
+
+                                <td data-label='Statement' style='padding: 8px;'>{$statementActions}</td>
 
                               </tr>";
 
@@ -2326,6 +2334,8 @@ try {
 
                                     <th style='padding: 8px; color: var(--bs-body-color); font-size: 12px; font-weight: 600;'>Closing</th>
 
+                                    <th style='padding: 8px; color: var(--bs-body-color); font-size: 12px; font-weight: 600;'>Statement</th>
+
                                 </tr>
 
                             </thead>
@@ -2352,6 +2362,9 @@ try {
                     $badgeAccessibility = $isSharedAccount
                         ? " title='Shared account' aria-label='Shared account'"
                         : " title='E-cash' aria-label='E-cash'";
+                    $statementQuery = 'channel_type=ecash&amp;channel_key=' . rawurlencode((string)($ch->channel_key ?? ''));
+                    $statementBase = ROOT . '/admin/operations_accounts/';
+                    $statementActions = "<div class='cashdrawer-statement-actions'><a class='btn btn-sm btn-outline-primary' href='{$statementBase}view_channel_statement/{$drawerId}?{$statementQuery}'><i class='fa fa-eye' aria-hidden='true'></i> View</a><a class='btn btn-sm btn-outline-danger' href='{$statementBase}export_channel_statement_pdf/{$drawerId}?{$statementQuery}' target='_blank' rel='noopener'><i class='fa fa-file-pdf' aria-hidden='true'></i> PDF</a></div>";
 
                     $html .= "<tr class='cashdrawer-channel-row {$rowClass}' style='border-bottom: 1px solid var(--bs-border-color);'>
 
@@ -2364,6 +2377,8 @@ try {
                                 <td data-label='Debit' style='padding: 8px; color: var(--bs-danger-text); font-size: 12px; font-weight: 600;'>-" . number_format((float)($ch->debit ?? 0), 2) . "</td>
 
                                 <td data-label='Closing' style='padding: 8px; color: var(--bs-body-color); font-size: 12px; font-weight: 600;'>" . number_format((float)($ch->closing_balance ?? 0), 2) . "</td>
+
+                                <td data-label='Statement' style='padding: 8px;'>{$statementActions}</td>
 
                             </tr>";
 

@@ -39,6 +39,8 @@
 			font-size: 12px;
 		}
 	</style>
+	<link rel="stylesheet" href="<?=ROOT?>/plugins/backoffice/assets/css/select-badges.css">
+	<script src="<?=ROOT?>/plugins/backoffice/assets/js/select-badges.js"></script>
 	<?php if(!empty($row)): ?>
 	<?php
 		$paymentAssignedSnapshot = (!$__is_bulk_payment && function_exists('backoffice_assignment_snapshot_lines'))
@@ -49,6 +51,9 @@
 		<div class="row col-sm-12 col-md-8 col-lg-5 mx-auto shadow p-2 rounded">
 			
 			<?=csrf()?>
+			<?php if(!empty($errors['form'])): ?>
+				<div class="alert alert-danger"><?=esc($errors['form'])?></div>
+			<?php endif ?>
 
 			<h4 class="text-center">
 				<span><img src="<?=APP_LOGO2 ?? ''?>" style="cursor:pointer;width:100%;max-width:60px;max-height: 60px;object-fit: cover;"></span>
@@ -72,7 +77,7 @@
 
 			<div class=" col-md-12 ">
 				<label for="network" class="form-label">Payment Option</label>
-				<select class="form-select" name="network" id="network" onchange="updatePaymentOptions()" disabled>	
+				<select class="form-select bo-select-badge" name="network" id="network" onchange="updatePaymentOptions()" disabled>
 				  <option value="">---Select---</option>
 				  <!-- Options will be populated dynamically based on transaction type -->
 				  <option <?=old_select('network','BANK', $row->network ?? '')?> value="BANK">BANK</option>
@@ -88,7 +93,7 @@
 
 			<div class=" col-md-12 ">
 				<label for="payment_type" class="form-label">Payment Type</label>
-				<select class="form-select payment_type" id="payment_type" name="payment_type" disabled>
+				<select class="form-select payment_type bo-select-badge" id="payment_type" name="payment_type" disabled>
 					<!-- Options will be displayed dynamically -->
 				 </select>
 				<input type="hidden" name="payment_type" value="<?=old_value('payment_type', $row->payment_type ?? '')?>" />
@@ -145,7 +150,7 @@
 
 			<div class=" col-md-12 wallet_out_id">
 			  <label for="wallet_out_id" class="form-label">Source of funds</label>
-			  <select class="form-select id_type" name="wallet_out_id" id="wallet_out_id" disabled>
+			  <select class="form-select id_type bo-select-badge" name="wallet_out_id" id="wallet_out_id" disabled>
 				  <option value="">---Select---</option>
 				  <?php if(!empty($wallets)):?>
 				  	<?php foreach ($wallets as $wallet): ?>			  		
@@ -161,7 +166,7 @@
 
 			<div class=" col-md-12 pay_to">
 			  <label for="pay_to" class="form-label">Pay to</label>
-			  <select class="form-select id_type" name="pay_to" id="pay_to" disabled>
+			  <select class="form-select id_type bo-select-badge" name="pay_to" id="pay_to" disabled>
 				  <option value="">---Select---</option>
 				  <?php if(!empty($users)):?>
 				  	<?php foreach ($users as $user): ?>			  		
@@ -178,7 +183,7 @@
 		    <!-- Till/Code Input, visible for specific categories only -->
 		    <div class=" col-md-12 receiving_wallet">
 		      <label for="receiving_wallet" class="form-label">Receiving account</label>
-		      <select class="form-select receiving_wallet" name="receiving_wallet" disabled>
+		      <select class="form-select receiving_wallet bo-select-badge" name="receiving_wallet" disabled>
 					  <option value="">---Select---</option>
 					  <?php if(!empty($otherWallets)):?>
 					  	<?php foreach ($otherWallets as $wallet): ?>				  		
@@ -192,17 +197,22 @@
 		      <?php endif?>
 		    </div>
 				
-			<div class=" col-md-12">
-			  <label for="description" class="form-label">Description</label>
-				<textarea rows="2" id="description" class="form-control" name="description"  placeholder="Write a brief description for this transaction" readonly><?=old_value('description', $row->description ?? '')?></textarea>			
+			<div class="col-md-12">
+				<label for="urgency" class="form-label">Urgency</label>
+				<select class="form-select bo-select-badge" name="urgency" id="urgency" required>
+					<?php foreach (backoffice_urgency_options() as $__urgency => $__urgencyDescription): ?>
+						<option <?=old_select('urgency', $__urgency, $row->urgency ?? 'Normal')?> value="<?=esc($__urgency)?>"><?=esc($__urgency)?> - <?=esc($__urgencyDescription)?></option>
+					<?php endforeach; ?>
+				</select>
+				<small class="text-muted">Set the response expectation for the assigned user.</small>
+				<?php if(!empty($errors['urgency'])): ?>
+					<small class="text-danger d-block"><?=esc($errors['urgency'])?></small>
+				<?php endif; ?>
 			</div>
-				<?php if(!empty($errors['description'])):?>
-				  <small class="text-danger"><?=$errors['description']?></small>
-				<?php endif?>
 
 			<div class=" col-md-12 transaction_status">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status"
+			  <select class="form-select transaction_status bo-select-badge" name="transaction_status"
 			  <?php if($row->created_by != $user_id && !user_can('approve_transaction')){echo ('disabled');}?>
 			  >
 				  <option value="">---Select---</option>

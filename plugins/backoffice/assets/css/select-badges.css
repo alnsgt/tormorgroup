@@ -1,0 +1,153 @@
+.bo-select-native {
+	position: absolute !important;
+	width: 1px !important;
+	height: 1px !important;
+	padding: 0 !important;
+	margin: -1px !important;
+	overflow: hidden !important;
+	clip: rect(0, 0, 0, 0) !important;
+	white-space: nowrap !important;
+	border: 0 !important;
+	opacity: 0 !important;
+}
+
+.bo-select-pill-group {
+	display: flex;
+	flex-flow: row wrap;
+	gap: .4rem;
+	width: 100%;
+	min-width: 0;
+}
+
+.bo-select-pill {
+	appearance: none;
+	cursor: pointer;
+	text-align: center;
+	font: inherit;
+	min-height: 2.4rem;
+	transition: opacity .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.bo-select-pill:not([aria-checked="true"]) {
+	opacity: .72;
+}
+
+.bo-select-pill[aria-checked="true"] {
+	border-color: currentColor;
+	box-shadow: 0 2px 8px rgba(15, 23, 42, .12);
+	opacity: 1;
+}
+
+.bo-select-pill:not(:disabled):hover {
+	opacity: 1;
+	transform: translateY(-1px);
+}
+
+.bo-select-pill:focus-visible {
+	outline: 3px solid var(--bs-primary, #2563eb);
+	outline-offset: 2px;
+}
+
+.bo-select-pill:disabled {
+	cursor: not-allowed;
+	opacity: .48;
+}
+
+.bo-select-pill-group.is-invalid {
+	border-radius: .8rem;
+	outline: 2px solid var(--bs-danger, #dc3545);
+	outline-offset: .2rem;
+}
+
+.bo-select-pill-group--sm .bo-select-pill {
+	padding: .2rem .45rem;
+	font-size: .68rem;
+}
+
+.bo-select-prompt {
+	align-self: center;
+	padding: .35rem .15rem;
+	color: var(--bs-secondary-color, #64748b);
+	font-size: .8rem;
+	font-style: italic;
+}
+
+.bo-option-badge,
+.bo-urgency-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: .35rem;
+	max-width: 100%;
+	padding: .25rem .6rem;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	font-size: .76rem;
+	font-weight: 650;
+	line-height: 1.25;
+	white-space: normal;
+}
+
+.bo-urgency-badge__action {
+	font-size: .68rem;
+	font-weight: 500;
+	opacity: .88;
+}
+
+.bo-option-badge--immediate,
+.bo-urgency-badge--immediate {
+	background: #fee2e2;
+	border-color: #fecaca;
+	color: #991b1b;
+}
+
+.bo-option-badge--high,
+.bo-urgency-badge--high {
+	background: #ffedd5;
+	border-color: #fed7aa;
+	color: #9a3412;
+}
+
+.bo-option-badge--normal,
+.bo-urgency-badge--normal {
+	background: #dbeafe;
+	border-color: #bfdbfe;
+	color: #1d4ed8;
+}
+
+.bo-option-badge--low,
+.bo-urgency-badge--low {
+	background: #e2e8f0;
+	border-color: #cbd5e1;
+	color: #334155;
+}
+
+.bo-option-badge--approved {
+	background: #dcfce7;
+	border-color: #bbf7d0;
+	color: #166534;
+}
+
+.bo-option-badge--pending {
+	background: #fef3c7;
+	border-color: #fde68a;
+	color: #92400e;
+}
+
+.bo-option-badge--rejected {
+	background: #fee2e2;
+	border-color: #fecaca;
+	color: #991b1b;
+}
+
+.bo-option-badge--draft,
+.bo-option-badge--default {
+	background: #f1f5f9;
+	border-color: #e2e8f0;
+	color: #475569;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.bo-select-pill {
+		transition: none;
+	}
+}

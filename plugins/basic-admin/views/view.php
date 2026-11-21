@@ -1244,6 +1244,24 @@
         overflow-wrap: anywhere;
     }
 
+    #drawerContent .cashdrawer-statement-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        min-width: 9rem;
+    }
+
+    #drawerContent .cashdrawer-statement-actions .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        border-radius: 0.5rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
     #drawerContent .cashdrawer-summary-header {
         position: relative;
         overflow: hidden;
@@ -1757,6 +1775,15 @@
             padding-bottom: 0.45rem !important;
             border-bottom: 1px solid var(--bs-border-color) !important;
             font-weight: 700;
+        }
+
+        #drawerContent .cashdrawer-channel-table tbody td[data-label="Statement"] {
+            grid-column: 1 / -1;
+            border-top: 1px solid var(--bs-border-color) !important;
+        }
+
+        #drawerContent .cashdrawer-statement-actions {
+            min-width: 0;
         }
 
         #drawerContent .cashdrawer-channel-table td span {

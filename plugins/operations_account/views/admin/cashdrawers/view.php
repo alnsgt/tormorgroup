@@ -1029,6 +1029,15 @@ window.toggleDenoHistoryModal = function() {
                     <div class="stat-value"><?= $currencyLabel ?> <?= number_format($channel->closing_balance ?? 0, 2) ?></div>
                 </div>
             </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+                <?php
+                    $statementKey = (string)($channel->channel_key ?? '');
+                    $statementParams = http_build_query(['channel_type' => 'cash', 'channel_key' => $statementKey]);
+                    $statementBase = ROOT . '/' . $admin_route . '/' . $plugin_route;
+                ?>
+                <a class="btn btn-sm btn-outline-primary" href="<?=esc($statementBase . '/view_channel_statement/' . (int)($row->id ?? 0) . '?' . $statementParams)?>">View statement</a>
+                <a class="btn btn-sm btn-outline-danger" target="_blank" href="<?=esc($statementBase . '/export_channel_statement_pdf/' . (int)($row->id ?? 0) . '?' . $statementParams)?>"><i class="fa fa-file-pdf" aria-hidden="true"></i> Export PDF</a>
+            </div>
         </div>
         <?php 
                 endif;
@@ -1098,6 +1107,15 @@ window.toggleDenoHistoryModal = function() {
                     <div class="stat-label">Closing</div>
                     <div class="stat-value">GHS <?= number_format($channel->closing_balance ?? 0, 2) ?></div>
                 </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+                <?php
+                    $statementKey = (string)($channel->channel_key ?? '');
+                    $statementParams = http_build_query(['channel_type' => 'ecash', 'channel_key' => $statementKey]);
+                    $statementBase = ROOT . '/' . $admin_route . '/' . $plugin_route;
+                ?>
+                <a class="btn btn-sm btn-outline-primary" href="<?=esc($statementBase . '/view_channel_statement/' . (int)($row->id ?? 0) . '?' . $statementParams)?>">View statement</a>
+                <a class="btn btn-sm btn-outline-danger" target="_blank" href="<?=esc($statementBase . '/export_channel_statement_pdf/' . (int)($row->id ?? 0) . '?' . $statementParams)?>"><i class="fa fa-file-pdf" aria-hidden="true"></i> Export PDF</a>
             </div>
         </div>
         <?php 

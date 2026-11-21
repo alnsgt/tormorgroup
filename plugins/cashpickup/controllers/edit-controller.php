@@ -504,6 +504,11 @@ if ($csrf && $cashpickup->validate_update($postdata))
 			}
 		}
 
+		\CashpickupActivity\record(
+			'edited',
+			$userId,
+			'Cashpickup transaction #' . (int)($row->id ?? 0) . ' updated.'
+		);
 		message_success("Cash pickup updated successfully!");
 		redirect($admin_route.'/'.$plugin_route);
 	}

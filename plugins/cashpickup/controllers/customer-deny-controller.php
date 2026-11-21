@@ -41,6 +41,22 @@ if ($reason === '') {
 try {
 	\CashpickupLedger\ensure_cashpickup_customer_schema($db);
 	\CashpickupLedger\ensure_cashpickup_customer_approval_columns($db);
+	$assignedRows = $db->query(
+		"SELECT approval_assigned_to
+		 FROM cashpickup_customers
+		 WHERE deleted = 0 AND id = :id
+		 LIMIT 1",
+		['id' => $customerId]
+	) ?: [];
+	if (empty($assignedRows)) {
+		message_fail('Customer not found.');
+		redirect($admin_route . '/' . $plugin_route . '/customers?tab=new');
+	}
+	$assignedApproverId = (int)($assignedRows[0]->approval_assigned_to ?? 0);
+	if ($assignedApproverId <= 0 || $assignedApproverId !== $userId) {
+		message_fail('Only the assigned approver can deny this customer registration.');
+		redirect($admin_route . '/' . $plugin_route . '/customers?tab=new');
+	}
 	$db->query(
 		"UPDATE cashpickup_customers
 		 SET approval_status = 'denied',
@@ -73,6 +89,12 @@ try {
 		message_fail('Customer denial was not saved. Refresh and try again.');
 		redirect($admin_route . '/' . $plugin_route . '/customers?tab=new');
 	}
+	\CashpickupActivity\record(
+		'denied',
+		$userId,
+		'Customer registration #' . $customerId . ' denied. Reason: ' . $reason,
+		'cashpickup_customers'
+	);
 	message_success('Customer registration denied.');
 } catch (\Throwable $e) {
 	error_log('[cashpickup] Customer denial failed for customer ' . $customerId . ': ' . $e->getMessage());

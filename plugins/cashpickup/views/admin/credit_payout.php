@@ -16,6 +16,7 @@
 	$customer = !empty($customerRows) ? $customerRows[0] : null;
 
 	$eligibleAgents = [];
+	$creditApprovers = [];
 	$regularBalance = 0.0;
 	$creditMetrics = [
 		'total_credit_given' => 0.0,
@@ -25,6 +26,9 @@
 
 	if (!empty($customer)) {
 		try {
+			require_once plugin_path('helpers/permissions.php');
+			$approvalSession = get_session();
+			$creditApprovers = \CashpickupPermissions\eligible_approvers($db, (int)($approvalSession->id ?? 0), true);
 			$paidOutExpr = "(CASE
 				WHEN LOWER(transaction_side) = 'pay'
 					AND " . \CashpickupLedger\normalized_cashpickup_credit_mode_sql() . " <> 'credit'
@@ -53,7 +57,7 @@
 			}
 			$summary = $db->query(
 				"SELECT
-					COALESCE(SUM(CASE WHEN LOWER(transaction_side) = 'receive' AND " . \CashpickupLedger\normalized_cashpickup_credit_mode_sql() . " <> 'credit' THEN amount_involved ELSE 0 END),0) AS total_received,
+					COALESCE(SUM(" . \CashpickupLedger\statement_received_amount_sql() . "),0) AS total_received,
 					COALESCE(SUM({$paidOutExpr}),0) AS total_paid
 				 FROM cashpickups
 				 WHERE deleted = 0
@@ -95,7 +99,9 @@
 					WHERE urm.disabled = 0
 					AND LOWER(ur.role) IN (
 						'manager','admin','is_manager','is_admin',
-						'general manager','general_manager','generalmanager','gm','is_general_manager'
+						'general manager','general_manager','generalmanager','gm','is_general_manager',
+						'operations manager','operations_manager','operationsmanager',
+						'ops manager','ops_manager','opsmanager','is_operations_manager'
 					)
 				 ) blocked_roles ON blocked_roles.user_id = u.id
 				 WHERE u.deleted = 0
@@ -182,6 +188,23 @@
 						<small class="text-danger"><?=$errors['assign_to_user_id']?></small>
 					<?php endif; ?>
 				</div>
+				<?php if (!user_can('is_admin')): ?>
+					<div class="col-12 col-md-6">
+						<label class="form-label">Assign admin to acknowledge</label>
+						<select name="approval_assigned_to" class="form-select" required>
+							<option value="">---Select an admin---</option>
+							<?php foreach ($creditApprovers as $approver): ?>
+								<?php $approverName = trim($approver->first_name . ' ' . $approver->last_name); ?>
+								<option value="<?=esc((string)$approver->id)?>" <?=((string)old_value('approval_assigned_to') === (string)$approver->id) ? 'selected' : ''?>>
+									<?=esc(($approverName !== '' ? $approverName : ('User #' . $approver->id)) . ' - ' . $approver->role_label)?>
+								</option>
+							<?php endforeach; ?>
+						</select>
+						<?php if(!empty($errors['approval_assigned_to'])): ?>
+							<small class="text-danger"><?=$errors['approval_assigned_to']?></small>
+						<?php endif; ?>
+					</div>
+				<?php endif; ?>
 
 				<div class="col-12 col-md-3">
 					<label class="form-label">Credit amount</label>

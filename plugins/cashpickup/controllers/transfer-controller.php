@@ -646,6 +646,14 @@ try{
 		if ($db->has_error || $db->affected_rows !== 1) {
 			throw new \RuntimeException('Unable to update the cashpickup assignee.');
 		}
+		if (!\CashpickupActivity\record(
+			'assigned',
+			$actorId,
+			'Cashpickup transaction #' . $id . ' assigned to user #' . $targetUserId . ' for ' . number_format($transferAmount, 2, '.', '') . '.',
+			'cashpickup_transfers'
+		)) {
+			throw new \RuntimeException('Unable to record the assignment activity.');
+		}
 		if (!$db->commit()) {
 			throw new \RuntimeException('Unable to complete the reassignment.');
 		}

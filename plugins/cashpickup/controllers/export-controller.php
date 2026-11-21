@@ -347,6 +347,8 @@ $customersFetch = function() use ($db): array {
 			       COALESCE(SUM(CASE
 			       	WHEN LOWER(transaction_side) = 'receive'
 			       		AND LOWER(TRIM(COALESCE(credit_mode,''))) <> 'credit'
+						AND LOWER(TRIM(COALESCE(transaction_status,''))) NOT IN ('cancelled','canceled','denied','rejected')
+						AND LOWER(TRIM(COALESCE(approval_status,''))) NOT IN ('cancelled','canceled','denied','rejected')
 			       	THEN amount_involved
 			       	ELSE 0
 			       END),0) AS total_received,

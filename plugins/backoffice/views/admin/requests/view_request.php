@@ -134,6 +134,10 @@
                                         </td>
                                     </tr>
                                     <tr>
+                                        <th class="text-muted text-uppercase small">Urgency</th>
+                                        <td><?=backoffice_urgency_badge($row->urgency ?? 'Normal')?></td>
+                                    </tr>
+                                    <tr>
                                         <th class="text-muted text-uppercase small">Network</th>
                                         <td><?=esc($row->network)?></td>
                                     </tr>

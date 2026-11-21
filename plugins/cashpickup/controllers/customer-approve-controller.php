@@ -36,11 +36,28 @@ if ($customerId <= 0) {
 try {
 	\CashpickupLedger\ensure_cashpickup_customer_schema($db);
 	\CashpickupLedger\ensure_cashpickup_customer_approval_columns($db);
+	$assignedRows = $db->query(
+		"SELECT approval_assigned_to, approval_status
+		 FROM cashpickup_customers
+		 WHERE deleted = 0 AND id = :id
+		 LIMIT 1",
+		['id' => $customerId]
+	) ?: [];
+	if (empty($assignedRows)) {
+		message_fail('Customer not found.');
+		redirect($admin_route . '/' . $plugin_route . '/customers?tab=new');
+	}
+	$assignedApproverId = (int)($assignedRows[0]->approval_assigned_to ?? 0);
+	if ($assignedApproverId <= 0 || $assignedApproverId !== $userId) {
+		message_fail('Only the assigned approver can approve this customer registration.');
+		redirect($admin_route . '/' . $plugin_route . '/customers?tab=new');
+	}
 	$db->query(
 		"UPDATE cashpickup_customers
 		 SET approval_status = 'approved',
 		     approved_by = :approved_by,
 		     approved_at = :approved_at,
+		     approval_assigned_to = NULL,
 		     denial_reason = NULL,
 		     updated_by = :updated_by,
 		     date_updated = :date_updated
@@ -69,6 +86,12 @@ try {
 		message_fail('Customer approval was not saved. Refresh and try again.');
 		redirect($admin_route . '/' . $plugin_route . '/customers?tab=new');
 	}
+	\CashpickupActivity\record(
+		'approved',
+		$userId,
+		'Customer registration #' . $customerId . ' approved.',
+		'cashpickup_customers'
+	);
 	message_success('Customer registration approved.');
 } catch (\Throwable $e) {
 	error_log('[cashpickup] Customer approval failed for customer ' . $customerId . ': ' . $e->getMessage());

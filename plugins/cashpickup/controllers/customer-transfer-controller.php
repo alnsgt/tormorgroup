@@ -1,19 +1,30 @@
 <?php
 
 require_once plugin_path('helpers/customer-ledger.php');
+require_once plugin_path('helpers/permissions.php');
 
 // Agents (view/add cashpickup) AND managers/admins may transfer between customers.
-if(!(user_can('view_cashpickup') || user_can('add_cashpickup') || user_can('is_manager') || user_can('is_admin'))){
+$session = get_session();
+$actorId = (int)($session->id ?? 0);
+$isOperationsManager = false;
+try {
+	$accessDb = new \Core\Database;
+	$isOperationsManager = \CashpickupPermissions\is_operations_manager($accessDb, $actorId);
+} catch (\Throwable $e) {
+	error_log('[cashpickup] Customer transfer access check failed: ' . $e->getMessage());
+	message_fail('Unable to verify access. Please try again.');
+	redirect($admin_route.'/'.$plugin_route.'/customers');
+}
+if(!(user_can('view_cashpickup') || user_can('add_cashpickup') || user_can('is_manager') || user_can('is_admin') || $isOperationsManager)){
 	message_fail('Access denied');
 	redirect($admin_route.'/'.$plugin_route.'/customers');
 }
 
-$session = get_session();
-$actorId = (int)($session->id ?? 0);
 $fromCustomerId = (int)(URL(3) ?? ($req->post('from_customer_id') ?? 0));
 $toCustomerId = (int)($req->post('to_customer_id') ?? 0);
 $amount = (float)($req->post('amount') ?? 0);
 $note = trim((string)($req->post('notes') ?? ''));
+$approvalAssigneeId = (int)($req->post('approval_assigned_to') ?? 0);
 
 if($fromCustomerId <= 0 || $toCustomerId <= 0 || $fromCustomerId === $toCustomerId){
 	message_fail('Select two different customers for the transfer.');
@@ -35,6 +46,10 @@ try{
 	\CashpickupLedger\ensure_cashpickup_customer_schema($db);
 	\CashpickupLedger\ensure_cashpickup_columns($db);
 	\CashpickupLedger\ensure_cashpickup_transfer_columns($db);
+	if (!\CashpickupPermissions\is_eligible_approver($db, $actorId, $approvalAssigneeId)) {
+		message_fail('Select a superior role to approve this transfer.');
+		redirect($admin_route.'/'.$plugin_route.'/customer/'.$fromCustomerId);
+	}
 
 	$fromRows = $db->query("SELECT * FROM cashpickup_customers WHERE deleted = 0 AND id = :id LIMIT 1", ['id' => $fromCustomerId]) ?: [];
 	$toRows = $db->query("SELECT * FROM cashpickup_customers WHERE deleted = 0 AND id = :id LIMIT 1", ['id' => $toCustomerId]) ?: [];
@@ -74,8 +89,9 @@ try{
 		'amount_transferred' => $amount,
 		'confirmed_by' => trim((string)(($session->first_name ?? '') . ' ' . ($session->last_name ?? ''))),
 		'notes' => $note,
-		'approval_status' => 'approved',
-		'transaction_status' => 'Approved',
+		'approval_status' => 'pending',
+		'approval_assigned_to' => $approvalAssigneeId,
+		'transaction_status' => 'Pending approval',
 		'created_by' => $actorId,
 		'updated_by' => null,
 		'disabled' => 0,
@@ -151,7 +167,13 @@ try{
 		}
 	}
 
-	message_success('Customer funds transferred successfully.');
+	\CashpickupActivity\record(
+		'transfer submitted',
+		$actorId,
+		'Customer funds transfer #' . (int)($insertedIds[0] ?? 0) . ' submitted from customer #' . $fromCustomerId . ' to customer #' . $toCustomerId . ' for ' . number_format($amount, 2, '.', '') . '.',
+		'cashpickups'
+	);
+	message_success('Customer funds transfer submitted for approval.');
 	redirect($admin_route.'/'.$plugin_route.'/customer/'.$fromCustomerId.'#customer-statement-pane');
 }catch(\Throwable $e){
 	message_fail('Unable to transfer customer funds.');

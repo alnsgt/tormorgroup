@@ -214,6 +214,14 @@ try {
 	if ($db->has_error || $db->affected_rows !== 1) {
 		throw new \RuntimeException('Unable to update the cashpickup assignment summary.');
 	}
+	if (!\CashpickupActivity\record(
+		'cancelled',
+		$actorId,
+		'Payout assignment for cashpickup transaction #' . $receiveId . ' released from user #' . $targetUserId . '.',
+		'cashpickup_transfers'
+	)) {
+		throw new \RuntimeException('Unable to record the payout reassignment activity.');
+	}
 	if (!$db->commit()) {
 		throw new \RuntimeException('Unable to complete assignment cancellation.');
 	}

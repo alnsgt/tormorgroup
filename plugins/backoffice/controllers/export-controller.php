@@ -535,6 +535,7 @@ $fetchRequestsList = function(array $filters) use ($db, $userId): array {
       m.request_type LIKE :find OR
       m.network LIKE :find OR
       m.transaction_status LIKE :find OR
+      m.urgency LIKE :find OR
       m.created_by LIKE :find OR
       m.assigned LIKE :find OR
       u.first_name LIKE :find OR
@@ -586,7 +587,7 @@ $fetchPaymentsList = function(array $filters) use ($db, $userId): array {
     }
   }
   if (!empty($filters['find'])) {
-    $conditions[] = '(m.id LIKE :find OR m.description LIKE :find OR m.network LIKE :find OR m.payment_type LIKE :find OR m.transaction_status LIKE :find)';
+    $conditions[] = '(m.id LIKE :find OR m.description LIKE :find OR m.network LIKE :find OR m.payment_type LIKE :find OR m.transaction_status LIKE :find OR m.urgency LIKE :find)';
     $params['find'] = '%' . $filters['find'] . '%';
   }
   if (!empty($filters['status']) && $filters['status'] !== 'all') {
@@ -1361,7 +1362,7 @@ try {
         $ids[] = (int)($r->assigned ?? 0);
       }
       $nameMap = $userNameMap($ids);
-      $headers = ['ID','Date','Network','Type','Amount','Status','Created By','Assigned To','Description'];
+      $headers = ['ID','Date','Network','Type','Amount','Urgency','Status','Created By','Assigned To','Description'];
       $outRows = [];
       foreach ($rows as $r) {
         $createdId = (int)($r->created_by ?? 0);
@@ -1372,6 +1373,7 @@ try {
           (string)($r->network ?? ''),
           (string)($r->request_type ?? ''),
           number_format((float)($r->amount ?? 0), 2, '.', ''),
+          (string)($r->urgency ?? 'Normal'),
           (string)($r->transaction_status ?? ''),
           (string)($nameMap[$createdId] ?? (string)($r->created_by ?? '')),
           (string)($nameMap[$assignedId] ?? (string)($r->assigned ?? '')),
@@ -1379,7 +1381,7 @@ try {
         ];
       }
       if ($format === 'pdf') {
-        $renderStandardPdfList('Requests List', $headers, $outRows, [5]);
+        $renderStandardPdfList('Requests List', $headers, $outRows, [5, 6]);
       }
       $sendXlsx('backoffice_requests_list_' . $stamp . '.xlsx', 'Requests', $headers, $outRows, $applyOrgToSheet, $org);
     }
@@ -1392,7 +1394,7 @@ try {
         $ids[] = (int)($r->pay_to ?? 0);
       }
       $nameMap = $userNameMap($ids);
-      $headers = ['ID','Date','Network','Payment Type','Amount','Status','Created By','Pay To','Description'];
+      $headers = ['ID','Date','Network','Payment Type','Amount','Urgency','Status','Created By','Pay To','Description'];
       $outRows = [];
       foreach ($rows as $r) {
         $createdId = (int)($r->created_by ?? 0);
@@ -1403,6 +1405,7 @@ try {
           (string)($r->network ?? ''),
           (string)($r->payment_type ?? ''),
           number_format((float)($r->amount ?? 0), 2, '.', ''),
+          (string)($r->urgency ?? 'Normal'),
           (string)($r->transaction_status ?? ''),
           (string)($nameMap[$createdId] ?? (string)($r->created_by ?? '')),
           (string)($nameMap[$payToId] ?? (string)($r->pay_to ?? '')),
@@ -1410,7 +1413,7 @@ try {
         ];
       }
       if ($format === 'pdf') {
-        $renderStandardPdfList('Payments List', $headers, $outRows, [5]);
+        $renderStandardPdfList('Payments List', $headers, $outRows, [5, 6]);
       }
       $sendXlsx('backoffice_payments_list_' . $stamp . '.xlsx', 'Payments', $headers, $outRows, $applyOrgToSheet, $org);
     }

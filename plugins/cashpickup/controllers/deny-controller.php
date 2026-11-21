@@ -57,143 +57,223 @@ if (empty($row)) {
 	redirect($denyReturnPath);
 }
 
-$side = strtolower(trim((string)($row->transaction_side ?? '')));
-$prevApproval = strtolower(trim((string)($row->approval_status ?? 'pending')));
-if ($prevApproval === '') $prevApproval = 'pending';
-
-$cashpickup->update($id, [
-	'approval_status' => 'denied',
-	'approved_by' => $actorId,
-	'approved_at' => date('Y-m-d H:i:s'),
-	'denial_reason' => $reason,
-	'updated_by' => $actorId,
-	'date_updated' => date('Y-m-d H:i:s'),
-]);
-if ($cashpickup->has_error) {
-	error_log('[cashpickup] Rejection update failed for transaction ' . $id . ': ' . $cashpickup->error);
-	message_fail('Unable to reject this cashpickup. Please try again.');
+$approvalAssigneeId = (int)($row->approval_assigned_to ?? 0);
+$prevApproval = strtolower(trim((string)($row->approval_status ?? '')));
+if ($prevApproval === '') {
+	$prevApproval = strtolower(trim((string)($row->transaction_status ?? ''))) === 'approved' ? 'approved' : 'pending';
+}
+$isPendingApprovalTask = in_array($prevApproval, ['pending', 'draft'], true)
+	|| str_starts_with(strtolower(trim((string)($row->transaction_status ?? ''))), 'pending');
+if (preg_match('/reject|declin|deni|cancel/i', $prevApproval . ' ' . (string)($row->transaction_status ?? ''))) {
+	message_fail('Rejected or cancelled cashpickup transactions cannot be denied again.');
 	redirect($denyReturnPath);
 }
-$deniedRow = $cashpickup->first(['id' => $id]);
-if (empty($deniedRow)
-	|| strtolower(trim((string)($deniedRow->approval_status ?? ''))) !== 'denied'
-	|| trim((string)($deniedRow->denial_reason ?? '')) !== $reason) {
-	message_fail('Cashpickup rejection was not saved. Please refresh and try again.');
+$isPreviouslyApproved = $prevApproval === 'approved'
+	|| strtolower(trim((string)($row->transaction_status ?? ''))) === 'approved';
+if (!$isPreviouslyApproved
+	&& (($approvalAssigneeId > 0 && $approvalAssigneeId !== $actorId)
+		|| ($approvalAssigneeId <= 0 && !$isPendingApprovalTask))) {
+	message_fail('Only the assigned approver can deny this transaction.');
 	redirect($denyReturnPath);
 }
 
-if ($side === 'pay' && strtolower(trim((string)($row->credit_mode ?? ''))) === 'credit') {
-	$linkReceiveId = (int)($row->receive_id ?? 0);
-	if ($linkReceiveId > 0) {
-		$cashpickup->update($linkReceiveId, [
-			'approval_status' => 'pending',
-			'approved_by' => null,
-			'approved_at' => null,
-			'transaction_status' => 'Pending payout',
-			'denial_reason' => $reason,
-			'updated_by' => $actorId,
-			'date_updated' => date('Y-m-d H:i:s'),
-		]);
+$db = new \Core\Database;
+$reversalHelperPath = realpath(__DIR__ . '/../helpers/reversal.php');
+if (!$reversalHelperPath || !file_exists($reversalHelperPath)) {
+	message_fail('Unable to load the cashpickup reversal service.');
+	redirect($denyReturnPath);
+}
+require_once $reversalHelperPath;
+try {
+	\CashpickupReversals\ensure_cashdrawer_reversal_table($db);
+} catch (\Throwable $e) {
+	message_fail($e->getMessage());
+	redirect($denyReturnPath);
+}
+if (!$db->beginTransaction()) {
+	message_fail('Unable to prepare cashpickup rejection.');
+	redirect($denyReturnPath);
+}
+
+try {
+	$lockedRows = $db->query(
+		"SELECT * FROM cashpickups
+		 WHERE id = :id AND (deleted IS NULL OR deleted = 0)
+		 LIMIT 1 FOR UPDATE",
+		['id' => $id]
+	) ?: [];
+	$lockedRow = $lockedRows[0] ?? null;
+	if (!$lockedRow) {
+		throw new \RuntimeException('Cashpickup transaction not found.');
 	}
-}
 
-// If an approved payout is denied later, reverse its cashdrawer impact
-if ($side === 'pay' && $prevApproval === 'approved') {
-	try {
-		$drawerUserId = (int)($row->created_by ?? 0);
-		if ($drawerUserId > 0) {
-			$pm = strtolower(trim((string)($row->payment_method ?? '')));
-			$transId = (int)($row->id ?? 0);
-			$bridgePath = realpath(__DIR__ . '/../../backoffice/helpers/cashdrawer-bridge.php');
-			if ($bridgePath && file_exists($bridgePath)) {
-				require_once $bridgePath;
-				\BackOfficeCashdrawer\init();
-				if ($pm === 'cash') {
-					$denos = \BackOfficeCashdrawer\normalizeDenominations($row->denos_json ?? '[]', (float)($row->amount_paid_out ?? 0), 'GHS');
-					// reverse cash OUT by syncing cash IN
-					\BackOfficeCashdrawer\syncCashMovement((int)$drawerUserId, $denos, (float)($row->amount_paid_out ?? 0), 'Approved', $transId, 'in');
-				} elseif ($pm === 'transfer') {
-					$drawerId = 0;
-					$ownerId = 0;
-					try {
-						$dbOwner = new \Core\Database;
-						$today = date('Y-m-d');
-						$r = $dbOwner->query("SELECT id, user_id FROM cashdrawers WHERE user_id = :user_id AND DATE(date_created) = :today ORDER BY id DESC LIMIT 1", ['user_id' => $drawerUserId, 'today' => $today]);
-						if (empty($r)) {
-							$r = $dbOwner->query("SELECT id, user_id FROM cashdrawers WHERE user_id = :user_id ORDER BY date_created DESC, id DESC LIMIT 1", ['user_id' => $drawerUserId]);
-						}
-						if (!empty($r)) {
-							$drawerId = (int)($r[0]->id ?? 0);
-							$ownerId = (int)($r[0]->user_id ?? 0);
-						}
-					} catch (\Throwable $e) {}
-					if ($drawerId > 0 && $ownerId > 0) {
-						$dbBal = new \Core\Database;
-						if ($dbBal->table_exists(['drawer_balances'])) {
-							$now = date('Y-m-d H:i:s');
-							$channel = strtoupper(trim((string)($row->payout_channel ?? '')));
-							$amt = (float)($row->amount_paid_out ?? 0);
-							if ($channel !== '' && $amt > 0) {
-								$rowsEcash = $dbBal->query(
-									"SELECT * FROM drawer_balances
-									 WHERE drawer_id = :drawer_id AND user_id = :user_id
-									 AND channel_type = 'ecash'
-									 AND (channel_key = :channel_key OR channel_key = :ecash_channel_key)
-									 ORDER BY id DESC LIMIT 1",
-									[
-										'drawer_id' => $drawerId,
-										'user_id' => $ownerId,
-										'channel_key' => $channel,
-										'ecash_channel_key' => 'ECASH_' . $channel,
-									]
-								);
-								if (empty($rowsEcash)) {
-									$opening = 0.0;
-									$closing = $opening + $amt;
-									$dbBal->query(
-										"INSERT INTO drawer_balances (drawer_id, user_id, channel_type, channel_key, opening_balance, credit, debit, closing_balance, date_created, trans_id, trans_status)
-										 VALUES (:drawer_id, :user_id, 'ecash', :channel_key, :opening, :credit, :debit, :closing, :date_created, :trans_id, :trans_status)",
-										[
-											'drawer_id' => $drawerId,
-											'user_id' => $ownerId,
-											'channel_key' => $channel,
-											'opening' => $opening,
-											'credit' => $amt,
-											'debit' => 0.0,
-											'closing' => $closing,
-											'date_created' => $now,
-											'trans_id' => $transId,
-											'trans_status' => 'Approved',
-										]
-									);
-								} else {
-									$rowEcash = $rowsEcash[0];
-									$opening = (float)($rowEcash->opening_balance ?? 0);
-									$newCredit = (float)($rowEcash->credit ?? 0);
-									$newDebit = max(0.0, (float)($rowEcash->debit ?? 0) - $amt);
-									$closing = $opening + $newCredit - $newDebit;
-									$dbBal->query(
-										"UPDATE drawer_balances
-										 SET channel_key = :channel_key, credit = :credit, debit = :debit, closing_balance = :closing
-										 WHERE id = :id",
-										[
-											'channel_key' => $channel,
-											'credit' => $newCredit,
-											'debit' => $newDebit,
-											'closing' => $closing,
-											'id' => (int)($rowEcash->id ?? 0),
-										]
-									);
-								}
-							}
-						}
-					}
-				}
+	$approvalAssigneeId = (int)($lockedRow->approval_assigned_to ?? 0);
+	$prevApproval = strtolower(trim((string)($lockedRow->approval_status ?? '')));
+	if ($prevApproval === '') {
+		$prevApproval = strtolower(trim((string)($lockedRow->transaction_status ?? ''))) === 'approved' ? 'approved' : 'pending';
+	}
+	$isPendingApprovalTask = in_array($prevApproval, ['pending', 'draft'], true)
+		|| str_starts_with(strtolower(trim((string)($lockedRow->transaction_status ?? ''))), 'pending');
+	if (preg_match('/reject|declin|deni|cancel/i', $prevApproval . ' ' . (string)($lockedRow->transaction_status ?? ''))) {
+		throw new \RuntimeException('Rejected or cancelled cashpickup transactions cannot be denied again.');
+	}
+	$isPreviouslyApproved = $prevApproval === 'approved'
+		|| strtolower(trim((string)($lockedRow->transaction_status ?? ''))) === 'approved';
+	if (!$isPreviouslyApproved
+		&& (($approvalAssigneeId > 0 && $approvalAssigneeId !== $actorId)
+			|| ($approvalAssigneeId <= 0 && !$isPendingApprovalTask))) {
+		throw new \RuntimeException('Only the assigned approver can deny this transaction.');
+	}
+
+	$row = $lockedRow;
+	$side = strtolower(trim((string)($row->transaction_side ?? '')));
+	$pairId = strtolower(trim((string)($row->payment_method ?? ''))) === 'customer_transfer'
+		? (int)($row->ledger_transfer_pair_id ?? 0)
+		: 0;
+	if ($side === 'receive') {
+		$linkedPayouts = $db->query(
+			"SELECT id FROM cashpickups
+			 WHERE receive_id = :receive_id
+			   AND LOWER(transaction_side) = 'pay'
+			   AND (deleted IS NULL OR deleted = 0)
+			   AND LOWER(COALESCE(approval_status,'')) NOT IN ('cancelled','canceled','denied','rejected')
+			   AND LOWER(COALESCE(transaction_status,'')) NOT IN ('cancelled','canceled','denied','rejected')
+			 LIMIT 1 FOR UPDATE",
+			['receive_id' => $id]
+		) ?: [];
+		if ($db->has_error) {
+			throw new \RuntimeException('Unable to check for linked cashpickup payouts.');
+		}
+		if (!empty($linkedPayouts)) {
+			throw new \RuntimeException('Reject or cancel linked payouts before rejecting this received transaction.');
+		}
+	}
+
+	\CashpickupReversals\reverse_approved_cashdrawer_effects($db, $row, $actorId);
+
+	if ($side === 'receive' && $db->table_exists(['cashpickup_credit_repayments'])) {
+		$db->query(
+			"DELETE FROM cashpickup_credit_repayments WHERE receive_id = :receive_id",
+			['receive_id' => $id]
+		);
+		if ($db->has_error) {
+			throw new \RuntimeException('Unable to reverse the linked customer credit repayments.');
+		}
+	}
+
+	$now = date('Y-m-d H:i:s');
+	if ($pairId > 0) {
+		$db->query(
+			"UPDATE cashpickups
+			 SET approval_status = 'denied',
+			     approval_assigned_to = NULL,
+			     approved_by = :approved_by,
+			     approved_at = :approved_at,
+			     denial_reason = :denial_reason,
+			     transaction_status = 'Denied',
+			     updated_by = :updated_by,
+			     date_updated = :date_updated
+			 WHERE ledger_transfer_pair_id = :pair_id
+			   AND (deleted IS NULL OR deleted = 0)",
+			[
+				'approved_by' => $actorId,
+				'approved_at' => $now,
+				'denial_reason' => $reason,
+				'updated_by' => $actorId,
+				'date_updated' => $now,
+				'pair_id' => $pairId,
+			]
+		);
+		if ($db->has_error || $db->affected_rows !== 2) {
+			throw new \RuntimeException('Unable to deny both sides of the customer transfer.');
+		}
+	} else {
+		$db->query(
+			"UPDATE cashpickups
+			 SET approval_status = 'denied',
+			     approval_assigned_to = NULL,
+			     approved_by = :approved_by,
+			     approved_at = :approved_at,
+			     denial_reason = :denial_reason,
+			     transaction_status = 'Denied',
+			     updated_by = :updated_by,
+			     date_updated = :date_updated
+			 WHERE id = :id",
+			[
+				'approved_by' => $actorId,
+				'approved_at' => $now,
+				'denial_reason' => $reason,
+				'updated_by' => $actorId,
+				'date_updated' => $now,
+				'id' => $id,
+			]
+		);
+		if ($db->has_error || $db->affected_rows <= 0) {
+			throw new \RuntimeException('Unable to reject this cashpickup. Please try again.');
+		}
+	}
+
+	if ($side === 'pay' && strtolower(trim((string)($row->credit_mode ?? ''))) === 'credit') {
+		$linkReceiveId = (int)($row->receive_id ?? 0);
+		if ($linkReceiveId > 0) {
+			$db->query(
+				"UPDATE cashpickups
+				 SET approval_status = 'pending',
+				     approved_by = NULL,
+				     approved_at = NULL,
+				     transaction_status = 'Pending payout',
+				     denial_reason = :denial_reason,
+				     updated_by = :updated_by,
+				     date_updated = :date_updated
+				 WHERE id = :id",
+				[
+					'denial_reason' => $reason,
+					'updated_by' => $actorId,
+					'date_updated' => $now,
+					'id' => $linkReceiveId,
+				]
+			);
+			if ($db->has_error) {
+				throw new \RuntimeException('Unable to update the linked credit payout.');
 			}
 		}
-	} catch (\Throwable $e) {
-		// fail silently
 	}
+
+	if ($db->table_exists(['commissions'])) {
+		$needle = '%| ID ' . $id;
+		$db->query(
+			"UPDATE commissions SET deleted = 1, date_deleted = :now
+			 WHERE commission_type = :ctype AND description LIKE :needle",
+			['now' => $now, 'ctype' => 'CASHPICKUP CHARGE', 'needle' => $needle]
+		);
+		if ($db->has_error) {
+			throw new \RuntimeException('Unable to reverse the cashpickup charge commission.');
+		}
+	}
+
+	if (!\CashpickupActivity\record(
+		'denied',
+		$actorId,
+		'Cashpickup transaction' . ($pairId > 0 ? ' pair #' . $pairId : ' #' . $id) . ' denied. Reason: ' . $reason
+	)) {
+		throw new \RuntimeException('Unable to record the rejection activity.');
+	}
+	$deniedRows = $db->query("SELECT * FROM cashpickups WHERE id = :id LIMIT 1", ['id' => $id]) ?: [];
+	$deniedRow = $deniedRows[0] ?? null;
+	if (!$deniedRow
+		|| strtolower(trim((string)($deniedRow->approval_status ?? ''))) !== 'denied'
+		|| trim((string)($deniedRow->denial_reason ?? '')) !== $reason) {
+		throw new \RuntimeException('Cashpickup rejection was not saved. Please refresh and try again.');
+	}
+	if (!$db->commit()) {
+		throw new \RuntimeException('Unable to commit cashpickup rejection.');
+	}
+} catch (\Throwable $e) {
+	$db->rollBack();
+	error_log('[cashpickup] Rejection failed for transaction ' . $id . ': ' . $e->getMessage());
+	message_fail($e->getMessage());
+	redirect($denyReturnPath);
+	exit;
 }
 
 $denialNotificationRecord = array_merge((array)$deniedRow, [

@@ -70,6 +70,11 @@ if(!$db->table_exists($tables)){
 }
 
 /** load shared helpers **/
+$cashpickupActivityLogHelper = plugin_path('helpers/activity-log.php');
+if (file_exists($cashpickupActivityLogHelper)) {
+	require_once $cashpickupActivityLogHelper;
+}
+
 $cashpickupWhatsAppHelper = plugin_path('helpers/whatsapp-notifications.php');
 if (file_exists($cashpickupWhatsAppHelper)) {
 	require_once $cashpickupWhatsAppHelper;
@@ -128,7 +133,8 @@ add_filter('basic-admin_before_admin_links',function($links){
 	$db = new \Core\Database;
 
 	$total_pending = 0;
-	$isManagerOrAdmin = (user_can('is_manager') || user_can('is_admin'));
+	$isManagerOrAdmin = user_can('is_manager') || user_can('is_admin')
+		|| user_can('is_general_manager') || user_can('is_operations_manager');
 	$cashPickupCanApprove = user_can('is_admin')
 		|| user_can('is_general_manager')
 		|| user_can('is_operations_manager');
@@ -140,19 +146,46 @@ add_filter('basic-admin_before_admin_links',function($links){
 			error_log('[cashpickup] Unable to verify approval access for navigation badge: ' . $e->getMessage());
 		}
 	}
+	$isManagerOrAdmin = $isManagerOrAdmin || $cashPickupCanApprove;
 
 	try{
 		$params = [];
 		$scopeWhere = '';
 		$hasCustomerTable = $db->table_exists(['cashpickup_customers']);
+		if ($cashPickupCanApprove) {
+			require_once __DIR__ . '/helpers/customer-ledger.php';
+			\CashpickupLedger\ensure_cashpickup_approval_assignee_columns($db);
+			if ($hasCustomerTable) {
+				\CashpickupLedger\ensure_cashpickup_customer_approval_columns($db);
+			}
+		}
 		$customerJoin = $hasCustomerTable
 			? 'LEFT JOIN cashpickup_customers cc ON cc.id = r.customer_id'
 			: '';
-		$customerApprovalCondition = $hasCustomerTable
-			? "OR LOWER(COALESCE(cc.approval_status,'approved')) IN ('pending','draft')"
-			: '';
+		$customerApprovalCondition = '';
+		if ($hasCustomerTable) {
+			$customerApprovalCondition = $cashPickupCanApprove
+				? "OR (LOWER(COALESCE(cc.approval_status,'approved')) IN ('pending','draft')
+					AND cc.approval_assigned_to = :uid_pending_customer_approver)"
+				: "OR LOWER(COALESCE(cc.approval_status,'approved')) IN ('pending','draft')";
+			if ($cashPickupCanApprove) {
+				$params['uid_pending_customer_approver'] = $user_id;
+			}
+		}
+		$pendingReceiveReviewCondition = "LOWER(COALESCE(NULLIF(TRIM(r.approval_status),''),'pending')) IN ('pending','draft')
+			OR LOWER(TRIM(COALESCE(r.transaction_status,''))) LIKE 'pending%'";
+		$pendingPartAssigneeCondition = '';
+		if ($cashPickupCanApprove) {
+			$pendingReceiveReviewCondition = "({$pendingReceiveReviewCondition})
+				AND (r.approval_assigned_to = :uid_pending_receive_approver
+					OR COALESCE(r.approval_assigned_to,0) <= 0)";
+			$pendingPartAssigneeCondition = 'AND (approval_assigned_to = :uid_pending_part_approver
+				OR COALESCE(approval_assigned_to,0) <= 0)';
+			$params['uid_pending_receive_approver'] = $user_id;
+			$params['uid_pending_part_approver'] = $user_id;
+		}
 		$sourceWhere = $isManagerOrAdmin
-			? " AND LOWER(COALESCE(r.source,'')) IN ('cash','mtn','telecel','at','bank','credit')"
+			? " AND LOWER(COALESCE(r.source,'')) IN ('cash','mtn','telecel','at','bank','credit','customer_transfer')"
 			: '';
 		$ownPendingReviewWhere = '';
 		if (!$cashPickupCanApprove && $user_id > 0) {
@@ -166,7 +199,6 @@ add_filter('basic-admin_before_admin_links',function($links){
 				)
 			)";
 			$params['uid_pending_creator'] = $user_id;
-			$params['uid_pending_part_creator'] = $user_id;
 		}
 		if(!$isManagerOrAdmin && $user_id > 0){
 			$scopeParts = [
@@ -201,14 +233,13 @@ add_filter('basic-admin_before_admin_links',function($links){
 				AND transaction_status = 'Approved'
 				AND confirmed_by IS NOT NULL AND confirmed_by != ''
 				AND COALESCE(amount_paid_out,0) > 0
-				AND (created_by IS NULL OR created_by <> :uid_pending_part_creator)
+				{$pendingPartAssigneeCondition}
 				GROUP BY receive_id
 			 ) pending ON pending.receive_id = r.id
-			 WHERE r.deleted = 0
+			 WHERE (r.deleted IS NULL OR r.deleted = 0)
 			 AND LOWER(r.transaction_side) = 'receive'
 			 AND (
-				LOWER(COALESCE(r.approval_status,'pending')) IN ('pending','draft')
-				OR LOWER(COALESCE(r.transaction_status,'')) LIKE 'pending%'
+				({$pendingReceiveReviewCondition})
 				{$customerApprovalCondition}
 				OR COALESCE(pending.pending_parts,0) > 0
 			 )
@@ -221,6 +252,25 @@ add_filter('basic-admin_before_admin_links',function($links){
 			throw new \RuntimeException('Unable to count pending cash pickups: ' . (string)$db->error);
 		}
 		$total_pending = (int)($pendingRows[0]->c ?? 0);
+
+		if ($cashPickupCanApprove) {
+			$managementReviewRows = $db->query(
+				"SELECT COUNT(DISTINCT id) AS c
+				 FROM cashpickups
+				 WHERE (deleted IS NULL OR deleted = 0)
+				 AND LOWER(TRIM(COALESCE(transaction_side,''))) = 'pay'
+				 AND LOWER(TRIM(COALESCE(approval_status,''))) IN ('pending','draft')
+				 AND (receive_id IS NULL OR receive_id = 0)
+				 AND (approval_assigned_to = :management_review_user
+					OR COALESCE(approval_assigned_to,0) <= 0)
+				 AND LOWER(TRIM(COALESCE(transaction_status,''))) NOT LIKE 'cancel%'",
+				['management_review_user' => $user_id]
+			);
+			if ($db->has_error) {
+				throw new \RuntimeException('Unable to count pending standalone cash pickup reviews: ' . (string)$db->error);
+			}
+			$total_pending += (int)($managementReviewRows[0]->c ?? 0);
+		}
 
 		if (!$isManagerOrAdmin && $user_id > 0 && $db->table_exists(['cashpickup_transfers'])) {
 			$assignedReadyRows = $db->query(
@@ -421,11 +471,14 @@ add_filter('basic-admin_before_admin_links',function($links){
 		if (\CashpickupPermissions\is_top_authority($db, $user_id)) {
 			try {
 				if ($hasCustomerTable) {
+					require_once __DIR__ . '/helpers/customer-ledger.php';
+					\CashpickupLedger\ensure_cashpickup_customer_approval_columns($db);
 					$pendingCustomers = $db->query(
 						"SELECT COUNT(DISTINCT c.id) AS c
 						 FROM cashpickup_customers c
 						 WHERE c.deleted = 0
 						 AND LOWER(COALESCE(c.approval_status,'approved')) IN ('pending','draft')
+						 AND c.approval_assigned_to = :pending_customer_approver
 						 AND NOT EXISTS (
 							SELECT 1
 							FROM cashpickup_customers duplicate_customer
@@ -467,7 +520,8 @@ add_filter('basic-admin_before_admin_links',function($links){
 									AND duplicate_customer.id < c.id
 								)
 							)
-						 )"
+						 )",
+						['pending_customer_approver' => $user_id]
 					);
 					if ($db->has_error) {
 						throw new \RuntimeException('Unable to count pending cash pickup customers: ' . (string)$db->error);
@@ -476,6 +530,64 @@ add_filter('basic-admin_before_admin_links',function($links){
 				}
 			} catch (\Throwable $e) {
 				error_log('[cashpickup] Unable to count pending customer approvals: ' . $e->getMessage());
+			}
+		}
+
+		if ($hasCustomerTable && user_can('view_cashpickup') && $db->table_exists(['cashpickups'])) {
+			try {
+				require_once __DIR__ . '/helpers/customer-ledger.php';
+				\CashpickupLedger\ensure_cashpickup_credit_schema($db);
+				$negativeBalanceSql = \CashpickupLedger\statement_delta_sql('negative_balance');
+				$negativeBalanceRows = $db->query(
+					"SELECT COUNT(DISTINCT c.id) AS c
+					 FROM cashpickup_customers c
+					 INNER JOIN (
+						SELECT negative_balance.customer_id,
+						       COALESCE(SUM({$negativeBalanceSql}),0) AS balance
+						FROM cashpickups negative_balance
+						WHERE negative_balance.deleted IS NULL OR negative_balance.deleted = 0
+						GROUP BY negative_balance.customer_id
+					 ) customer_balance ON customer_balance.customer_id = c.id
+					 WHERE c.deleted = 0
+					   AND LOWER(COALESCE(c.approval_status,'approved')) = 'approved'
+					   AND customer_balance.balance < -0.00001
+					   AND NOT EXISTS (
+						SELECT 1
+						FROM cashpickup_customers duplicate_customer
+						WHERE duplicate_customer.deleted = 0
+						  AND duplicate_customer.id <> c.id
+						  AND (
+							(
+								TRIM(COALESCE(duplicate_customer.id_number,'')) <> ''
+								AND LOWER(TRIM(duplicate_customer.id_number)) = LOWER(TRIM(c.id_number))
+							)
+							OR (
+								TRIM(COALESCE(duplicate_customer.phone_number,'')) <> ''
+								AND TRIM(duplicate_customer.phone_number) = TRIM(c.phone_number)
+								AND TRIM(COALESCE(duplicate_customer.full_name,'')) <> ''
+								AND LOWER(TRIM(duplicate_customer.full_name)) = LOWER(TRIM(c.full_name))
+							)
+						  )
+						  AND (
+							CASE WHEN LOWER(COALESCE(duplicate_customer.approval_status,'approved')) IN ('pending','draft') THEN 0 ELSE 1 END
+							<
+							CASE WHEN LOWER(COALESCE(c.approval_status,'approved')) IN ('pending','draft') THEN 0 ELSE 1 END
+							OR (
+								CASE WHEN LOWER(COALESCE(duplicate_customer.approval_status,'approved')) IN ('pending','draft') THEN 0 ELSE 1 END
+								=
+								CASE WHEN LOWER(COALESCE(c.approval_status,'approved')) IN ('pending','draft') THEN 0 ELSE 1 END
+								AND duplicate_customer.id < c.id
+							)
+						  )
+					   )",
+					[]
+				) ?: [];
+				if ($db->has_error) {
+					throw new \RuntimeException('Unable to count customers with negative balances: ' . (string)$db->error);
+				}
+				$total_pending += (int)($negativeBalanceRows[0]->c ?? 0);
+			} catch (\Throwable $e) {
+				error_log('[cashpickup] Unable to count customers with negative balances: ' . $e->getMessage());
 			}
 		}
 	}catch(\Throwable $e){
@@ -1006,7 +1118,18 @@ add_action('basic-admin_main_content',function(){
 			require plugin_path('views/admin/customer_view.php');
 		}else
 		if(URL(2) == 'credit-payout'){
-			$canCreateCreditPayout = user_can('is_admin') || user_can('is_manager');
+			require_once __DIR__ . '/helpers/permissions.php';
+			try {
+				$creditAccessDb = new \Core\Database;
+				$creditAccessSession = get_session();
+				$canCreateCreditPayout = \CashpickupPermissions\can_assign_customer_payout(
+					$creditAccessDb,
+					(int)($creditAccessSession->id ?? 0)
+				);
+			} catch (\Throwable $e) {
+				error_log('[cashpickup] Credit payout access check failed: ' . $e->getMessage());
+				$canCreateCreditPayout = false;
+			}
 			if(!$canCreateCreditPayout){
 				$ses->set('error', 'Access denied');
 				header('Location: '. ROOT .'/'.$admin_route.'/'.$plugin_route.'/customers');

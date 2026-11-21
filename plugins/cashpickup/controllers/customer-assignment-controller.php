@@ -112,6 +112,14 @@ try {
 	if ($db->has_error || $db->affected_rows !== 1) {
 		throw new \RuntimeException('Unable to save the customer payout assignment.');
 	}
+	if (!\CashpickupActivity\record(
+		'assigned',
+		$actorId,
+		'Customer #' . $customerId . ' balance of ' . number_format($amount, 2, '.', '') . ' assigned to user #' . $targetUserId . '.',
+		'cashpickup_customer_assignments'
+	)) {
+		throw new \RuntimeException('Unable to record the customer assignment activity.');
+	}
 	if (!$db->commit()) {
 		throw new \RuntimeException('Unable to complete the customer payout assignment.');
 	}

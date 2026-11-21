@@ -110,6 +110,12 @@ try {
 		$params
 	);
 
+	\CashpickupActivity\record(
+		'updated',
+		$userId,
+		'Customer ledger profile #' . $customerId . ' updated.',
+		'cashpickup_customers'
+	);
 	message_success('Customer ledger updated successfully.');
 	redirect($admin_route . '/' . $plugin_route . '/customer/' . $customerId);
 } catch (\Throwable $e) {

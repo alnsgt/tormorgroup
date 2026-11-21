@@ -22,6 +22,7 @@ class RequestClass extends Model
         'description',
         'response',
         'amount',
+        'urgency',
         'assigned',
         'cashdrawer_id',
         'drawer_user_id',
@@ -50,6 +51,7 @@ class RequestClass extends Model
         'description',
         'response',
         'amount',
+        'urgency',
         'assigned',
         'cashdrawer_id',
         'drawer_user_id',
@@ -74,12 +76,12 @@ class RequestClass extends Model
     {
         $this->errors = [];
 
-        if (empty($data['description'])) {
-            $this->errors['description'] = 'Description is required';
-        }
-
         if (empty($data['transaction_status'])) {
             $this->errors['transaction_status'] = 'Status is required';
+        }
+
+        if (array_key_exists('urgency', $data) && !in_array($data['urgency'], ['Immediate', 'High', 'Normal', 'Low'], true)) {
+            $this->errors['urgency'] = 'Select a valid urgency level';
         }
 
         if (empty($data['network'])) {
@@ -112,6 +114,10 @@ class RequestClass extends Model
 
         if (empty($data['transaction_status'])) {
             $this->errors['transaction_status'] = 'Status is required';
+        }
+
+        if (array_key_exists('urgency', $data) && !in_array($data['urgency'], ['Immediate', 'High', 'Normal', 'Low'], true)) {
+            $this->errors['urgency'] = 'Select a valid urgency level';
         }
 
         // Log errors for debugging

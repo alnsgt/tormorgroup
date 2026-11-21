@@ -97,6 +97,70 @@ if(!function_exists('backoffice_ensure_reject_reason_schema')){
 
 backoffice_ensure_reject_reason_schema();
 
+if (!function_exists('backoffice_urgency_options')) {
+	function backoffice_urgency_options(): array
+	{
+		return [
+			'Immediate' => 'Respond now',
+			'High' => 'Prioritize soon',
+			'Normal' => 'Standard response',
+			'Low' => 'Can wait',
+		];
+	}
+}
+
+if (!function_exists('backoffice_urgency_description')) {
+	function backoffice_urgency_description(string $urgency): string
+	{
+		$options = backoffice_urgency_options();
+		return $options[$urgency] ?? $options['Normal'];
+	}
+}
+
+if (!function_exists('backoffice_urgency_badge')) {
+	function backoffice_urgency_badge(?string $urgency): string
+	{
+		$urgency = $urgency ?? '';
+		$urgency = isset(backoffice_urgency_options()[$urgency]) ? $urgency : 'Normal';
+		$class = match ($urgency) {
+			'Immediate' => 'bo-urgency-badge--immediate',
+			'High' => 'bo-urgency-badge--high',
+			'Low' => 'bo-urgency-badge--low',
+			default => 'bo-urgency-badge--normal',
+		};
+
+		return '<span class="bo-urgency-badge ' . $class . '" title="' . esc(backoffice_urgency_description($urgency)) . '"><strong>' . esc($urgency) . '</strong><span class="bo-urgency-badge__action">' . esc(backoffice_urgency_description($urgency)) . '</span></span>';
+	}
+}
+
+if (!function_exists('backoffice_ensure_urgency_schema')) {
+	function backoffice_ensure_urgency_schema(): void
+	{
+		static $ensured = false;
+		if ($ensured) {
+			return;
+		}
+
+		$db = new \Core\Database;
+		foreach (['requests', 'payments_backoffice'] as $table) {
+			$columns = $db->query("SHOW COLUMNS FROM {$table} LIKE 'urgency'");
+			if ($db->has_error) {
+				throw new \RuntimeException("Unable to inspect {$table} urgency schema: " . $db->error);
+			}
+			if (empty($columns)) {
+				$db->query("ALTER TABLE {$table} ADD COLUMN IF NOT EXISTS urgency VARCHAR(20) NOT NULL DEFAULT 'Normal'");
+				if ($db->has_error) {
+					throw new \RuntimeException("Unable to add urgency to {$table}: " . $db->error);
+				}
+			}
+		}
+
+		$ensured = true;
+	}
+}
+
+backoffice_ensure_urgency_schema();
+
 if(!function_exists('backoffice_ensure_commission_assignment_schema')){
 	function backoffice_ensure_commission_assignment_schema(): void
 	{
@@ -3695,6 +3759,7 @@ add_action('controller', function () {
 				m.request_type LIKE :find OR
 				m.network LIKE :find OR
 				m.transaction_status LIKE :find OR
+				m.urgency LIKE :find OR
 				m.created_by LIKE :find OR
 				m.assigned LIKE :find OR
 				u.first_name LIKE :find OR
@@ -3724,6 +3789,7 @@ add_action('controller', function () {
 				m.date_created,
 				m.request_type,
 				m.network,
+				m.urgency,
 				m.description,
 				m.amount,
 				m.transaction_status,
@@ -3793,6 +3859,7 @@ add_action('controller', function () {
 				'created_at' => $row->date_created ?? '',
 				'network' => $row->network ?? '',
 				'request_type' => $row->request_type ?? '',
+				'urgency' => $row->urgency ?? 'Normal',
 				'description' => $row->description ?? '',
 				'amount' => (float)($row->amount ?? 0),
 				'status' => $row->transaction_status ?? '',
@@ -4369,6 +4436,7 @@ add_action('controller', function () {
 				m.network LIKE :find OR
 				m.payment_type LIKE :find OR
 				m.transaction_status LIKE :find OR
+				m.urgency LIKE :find OR
 				m.created_by LIKE :find OR
 				m.pay_to LIKE :find OR
 				u.first_name LIKE :find OR
@@ -4393,6 +4461,7 @@ add_action('controller', function () {
 				m.transaction_status,
 				m.reject_reason,
 				m.network,
+				m.urgency,
 				m.payment_type,
 				m.created_by,
 				m.pay_to,
@@ -4458,6 +4527,7 @@ add_action('controller', function () {
 				'description' => $row->description ?? '',
 				'amount' => (float)($row->amount ?? 0),
 				'status' => $row->transaction_status ?? '',
+				'urgency' => $row->urgency ?? 'Normal',
 				'reject_reason' => $row->reject_reason ?? '',
 				'network' => $row->network ?? '',
 				'payment_type' => $row->payment_type ?? '',

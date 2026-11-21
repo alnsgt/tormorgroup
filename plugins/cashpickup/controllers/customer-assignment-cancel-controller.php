@@ -67,6 +67,14 @@ try {
 	if ($db->has_error || $db->affected_rows !== 1) {
 		throw new \RuntimeException('Unable to cancel the customer assignment.');
 	}
+	if (!\CashpickupActivity\record(
+		'cancelled',
+		$actorId,
+		'Customer payout assignment #' . $assignmentId . ' for customer #' . $customerId . ' cancelled.',
+		'cashpickup_customer_assignments'
+	)) {
+		throw new \RuntimeException('Unable to record the assignment cancellation activity.');
+	}
 	if (!$db->commit()) {
 		throw new \RuntimeException('Unable to complete assignment cancellation.');
 	}

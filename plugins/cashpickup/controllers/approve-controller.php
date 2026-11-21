@@ -46,9 +46,18 @@ if (empty($row)) {
 	redirect($admin_route.'/'.$plugin_route);
 }
 
-$side = strtolower(trim((string)($row->transaction_side ?? '')));
+$approvalAssigneeId = (int)($row->approval_assigned_to ?? 0);
 $prevApproval = strtolower(trim((string)($row->approval_status ?? 'pending')));
 if ($prevApproval === '') $prevApproval = 'pending';
+$isPendingApprovalTask = in_array($prevApproval, ['pending', 'draft'], true)
+	|| str_starts_with(strtolower(trim((string)($row->transaction_status ?? ''))), 'pending');
+if (($approvalAssigneeId > 0 && $approvalAssigneeId !== $actorId)
+	|| ($approvalAssigneeId <= 0 && !$isPendingApprovalTask)) {
+	message_fail('Only the assigned approver can approve this transaction.');
+	redirect($admin_route.'/'.$plugin_route.'/view/'.$id);
+}
+
+$side = strtolower(trim((string)($row->transaction_side ?? '')));
 $source = strtolower(trim((string)($row->source ?? '')));
 if ($source === 'customer_withdrawal') {
 	$rowCustomerId = (int)($row->customer_id ?? 0);
@@ -58,7 +67,7 @@ if ($source === 'customer_withdrawal') {
 }
 $approvalReturnPath = $returnToView
 	? $admin_route.'/'.$plugin_route.'/view/'.$id
-	: ($source === 'customer_withdrawal' && $returnCustomerId > 0
+	: (in_array($source, ['customer_withdrawal', 'customer_transfer'], true) && $returnCustomerId > 0
 		? $admin_route.'/'.$plugin_route.'/customer/'.$returnCustomerId
 		: $admin_route.'/'.$plugin_route.'/view/'.(int)($row->receive_id ?? 0));
 $isCreditReceive = $side === 'receive' && strtolower(trim((string)($row->credit_mode ?? ''))) === 'credit';
@@ -158,6 +167,11 @@ if ($side === 'pay' && $prevApproval !== 'approved') {
 				if ($cashpickup->has_error) {
 					throw new \RuntimeException('Unable to record the insufficient-balance denial.');
 				}
+				\CashpickupActivity\record(
+					'denied',
+					$actorId,
+					'Cashpickup payout #' . $id . ' automatically denied because customer balance was insufficient.'
+				);
 				$notifyApprovalEvent('denied', 'Review the insufficient-balance denial and correct the customer payout if needed.', $denialReason);
 				message_fail('Payout denied automatically: insufficient customer account balance');
 				redirect($approvalReturnPath);
@@ -220,6 +234,11 @@ if ($side === 'pay' && $prevApproval !== 'approved') {
 					'updated_by' => $actorId,
 					'date_updated' => date('Y-m-d H:i:s'),
 				]);
+				\CashpickupActivity\record(
+					'denied',
+					$actorId,
+					'Cashpickup payout #' . $id . ' automatically denied because it exceeded the received balance.'
+				);
 				$notifyApprovalEvent('denied', 'Review the overage denial and correct the payout amount if needed.', $sysReason);
 				message_fail('Payout denied automatically: would exceed receive total');
 				redirect($approvalReturnPath);
@@ -454,6 +473,7 @@ if ($side === 'pay' && $prevApproval !== 'approved') {
 
 $approvalUpdate = [
 	'approval_status' => 'approved',
+	'approval_assigned_to' => null,
 	'approved_by' => $actorId,
 	'approved_at' => date('Y-m-d H:i:s'),
 	'denial_reason' => null,
@@ -463,11 +483,46 @@ $approvalUpdate = [
 if ($source === 'customer_withdrawal') {
 	$approvalUpdate['receive_id'] = null;
 }
-$cashpickup->update($id, $approvalUpdate);
-if ($cashpickup->has_error) {
-	error_log('[cashpickup] Approval update failed for transaction ' . $id . ': ' . $cashpickup->error);
-	message_fail('Unable to approve this cashpickup. Please try again.');
-	redirect($admin_route.'/'.$plugin_route);
+$pairId = strtolower(trim((string)($row->payment_method ?? ''))) === 'customer_transfer'
+	? (int)($row->ledger_transfer_pair_id ?? 0)
+	: 0;
+if ($pairId > 0) {
+	try {
+		$dbPair = new \Core\Database;
+		$dbPair->query(
+			"UPDATE cashpickups
+			 SET approval_status = 'approved',
+			     approval_assigned_to = NULL,
+			     approved_by = :approved_by,
+			     approved_at = :approved_at,
+			     denial_reason = NULL,
+			     transaction_status = 'Approved',
+			     updated_by = :updated_by,
+			     date_updated = :date_updated
+			 WHERE ledger_transfer_pair_id = :pair_id AND deleted = 0",
+			[
+				'approved_by' => $actorId,
+				'approved_at' => date('Y-m-d H:i:s'),
+				'updated_by' => $actorId,
+				'date_updated' => date('Y-m-d H:i:s'),
+				'pair_id' => $pairId,
+			]
+		);
+		if ($dbPair->has_error || $dbPair->affected_rows !== 2) {
+			throw new \RuntimeException('Unable to approve both sides of the customer transfer.');
+		}
+	} catch (\Throwable $e) {
+		error_log('[cashpickup] Customer transfer approval failed for pair ' . $pairId . ': ' . $e->getMessage());
+		message_fail('Unable to approve the customer transfer.');
+		redirect($approvalReturnPath);
+	}
+} else {
+	$cashpickup->update($id, $approvalUpdate);
+	if ($cashpickup->has_error) {
+		error_log('[cashpickup] Approval update failed for transaction ' . $id . ': ' . $cashpickup->error);
+		message_fail('Unable to approve this cashpickup. Please try again.');
+		redirect($admin_route.'/'.$plugin_route);
+	}
 }
 
 $approvedRow = $cashpickup->first(['id' => $id]);
@@ -502,6 +557,11 @@ if ($side === 'pay' && $prevApproval !== 'approved') {
 							'updated_by' => $actorId,
 							'date_updated' => date('Y-m-d H:i:s'),
 						]);
+						\CashpickupActivity\record(
+							'denied',
+							$actorId,
+							'Cashpickup payout #' . $id . ' automatically denied because the cashdrawer deduction failed.'
+						);
 						$notifyApprovalEvent('denied', 'Review the cashdrawer deduction failure and reconcile before retrying.', 'Cashdrawer sync failed while applying the payout deduction.');
 						message_fail('Payout denied automatically: unable to apply cashdrawer deduction.');
 						redirect($approvalReturnPath);
@@ -747,6 +807,11 @@ $notifyApprovalEvent(
 	$side === 'receive'
 		? 'Assign an eligible agent to complete the payout.'
 		: 'Continue with any remaining payout work for this cashpickup.'
+);
+\CashpickupActivity\record(
+	'approved',
+	$actorId,
+	'Cashpickup transaction #' . $id . ' approved (' . $side . ', amount ' . number_format((float)($row->amount_involved ?? 0), 2, '.', '') . ').'
 );
 message_success('Cashpickup approved');
 if ($returnToView) {

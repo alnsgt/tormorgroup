@@ -26,7 +26,7 @@
 		}
 		$__payment_swal_error = '';
 		if (is_array($__errors_session) && !empty($__errors_session)) {
-			foreach (['network', 'payment_type', 'amount', 'denos_json', 'denos_json_mismatch'] as $__errorKey) {
+			foreach (['network', 'payment_type', 'amount', 'denos_json', 'denos_json_mismatch', 'urgency', 'form'] as $__errorKey) {
 				$__candidateError = trim((string)($__errors_session[$__errorKey] ?? ''));
 				if ($__candidateError !== '') {
 					$__payment_swal_error = $__candidateError;
@@ -84,6 +84,8 @@
 			font-size: 12px;
 		}
 	</style>
+	<link rel="stylesheet" href="<?=ROOT?>/plugins/backoffice/assets/css/select-badges.css">
+	<script src="<?=ROOT?>/plugins/backoffice/assets/js/select-badges.js"></script>
 	<form method="post" enctype="multipart/form-data" autocomplete="off">		
 		<div class="row col-sm-12 col-md-8 col-lg-6 mx-auto shadow p-2 rounded">
 			
@@ -103,7 +105,6 @@
 						'bulk_payment_items' => (string)old_value('bulk_payment_items'),
 						'amount' => (string)old_value('amount'),
 						'denos_json' => (string)old_value('denos_json'),
-						'description' => (string)old_value('description'),
 						'pay_to' => (string)old_value('pay_to'),
 						'transaction_status' => (string)old_value('transaction_status'),
 					];
@@ -159,7 +160,7 @@
 
 			<div class=" col-md-12">
 				<label for="network" class="form-label">Payment Option</label>
-				<select class="form-select" name="network" id="network" onchange="updatePaymentOptions()">	
+				<select class="form-select bo-select-badge" name="network" id="network" onchange="updatePaymentOptions()">
 				  <option value="">---Select---</option>
 				  <!-- Options will be populated dynamically based on transaction type -->
 				  <option <?=old_select('network','BANK')?> value="BANK">BANK</option>
@@ -174,7 +175,7 @@
 
 			<div class=" col-md-12">
 				<label for="payment_type" class="form-label">Payment Type</label>
-				<select class="form-select payment_type" id="payment_type" name="payment_type">
+				<select class="form-select payment_type bo-select-badge" id="payment_type" name="payment_type">
 					<!-- Options will be displayed dynamically -->
 				 </select>
 				<?php if(!empty($errors['payment_type']) && (string)$errors['payment_type'] !== $__payment_swal_error): ?>
@@ -227,17 +228,22 @@
 				<?php endif ?>
 			</div>
 
-			<div class=" col-md-12">
-			  <label for="description" class="form-label">Description</label>
-				<textarea rows="2" id="description" class="form-control" name="description"  placeholder="Write a brief description for this transaction"><?=old_value('description')?></textarea>			
+			<div class="col-md-12">
+				<label for="urgency" class="form-label">Urgency</label>
+				<select class="form-select bo-select-badge" name="urgency" id="urgency" required>
+					<?php foreach (backoffice_urgency_options() as $__urgency => $__urgencyDescription): ?>
+						<option <?=old_select('urgency', $__urgency, 'Normal')?> value="<?=esc($__urgency)?>"><?=esc($__urgency)?> - <?=esc($__urgencyDescription)?></option>
+					<?php endforeach; ?>
+				</select>
+				<small class="text-muted">Set the response expectation for the assigned user.</small>
+				<?php if(!empty($errors['urgency'])): ?>
+					<small class="text-danger d-block"><?=esc($errors['urgency'])?></small>
+				<?php endif; ?>
 			</div>
-				<?php if(!empty($errors['description'])):?>
-				  <small class="text-danger"><?=$errors['description']?></small>
-				<?php endif?>
 
 			<div class="col-md-12  assigned">
 			  <label for="pay_to" class="form-label">Assigned to <small>(who is the payment going to?):</small></label>
-			  <select class="form-select pay_to" name="pay_to" required>
+			  <select class="form-select pay_to bo-select-badge" name="pay_to" required>
 				  <option value="">---Select---</option>
 				  <?php if(!empty($users)):?>
 				  	<?php foreach ($users as $user): ?>				  		
@@ -256,7 +262,7 @@
 
 			<div class=" col-md-12 transaction_status">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status">
+			  <select class="form-select transaction_status bo-select-badge" name="transaction_status">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 				  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>
@@ -356,7 +362,6 @@
 			bulk_payment_items: get('bulk_payment_items'),
 			amount: get('amount'),
 			denos_json: get('denos_json'),
-			description: get('description'),
 			pay_to: get('pay_to'),
 			transaction_status: get('transaction_status'),
 			ts: Date.now(),
@@ -386,7 +391,6 @@
 				clear('bulk_payment_items');
 				clear('amount');
 				clear('denos_json');
-				clear('description');
 				clear('pay_to');
 				clear('transaction_status');
 				existingPaymentType = '';
@@ -453,7 +457,6 @@
 		if (isBlank('bulk_payment_items')) set('bulk_payment_items', state.bulk_payment_items || '');
 		if (isBlank('amount')) set('amount', state.amount || '');
 		if (isBlank('denos_json')) set('denos_json', state.denos_json || '');
-		if (isBlank('description')) set('description', state.description || '');
 		if (isBlank('pay_to')) set('pay_to', state.pay_to || '');
 		if (isBlank('transaction_status')) set('transaction_status', state.transaction_status || '');
 		if (state.payment_type) {

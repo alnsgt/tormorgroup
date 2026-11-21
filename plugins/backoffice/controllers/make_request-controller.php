@@ -12,6 +12,8 @@
 	date_default_timezone_set('Africa/Accra');
 
 	$postdata = $req->post();
+	$postdata['description'] = $postdata['description'] ?? '';
+	$postdata['urgency'] = $postdata['urgency'] ?? 'Normal';
 
 	$csrf = csrf_verify($postdata);
 	$request = new \BackOffices\RequestClass;
@@ -202,8 +204,8 @@
 				'details' => [
 					'Network' => $postdata['network'] ?? '',
 					'Request type' => $postdata['request_type'] ?? '',
+					'Urgency' => ($postdata['urgency'] ?? 'Normal') . ' - ' . backoffice_urgency_description((string)($postdata['urgency'] ?? 'Normal')),
 					'Amount' => 'GHS ' . number_format($amountValue, 2),
-					'Description' => $postdata['description'] ?? '',
 				],
 				'view_url' => ROOT . '/admin/back_office/view_request/' . $insertedId,
 			]);

@@ -137,6 +137,18 @@
 	</style>
 
 	<?php
+		require_once plugin_path('helpers/permissions.php');
+		$addFormSession = get_session();
+		$isOperationsManager = false;
+		$isGeneralManager = false;
+		try {
+			$addFormDb = new \Core\Database;
+			$isOperationsManager = \CashpickupPermissions\is_operations_manager($addFormDb, (int)($addFormSession->id ?? 0));
+			$isGeneralManager = \CashpickupPermissions\is_general_manager($addFormDb, (int)($addFormSession->id ?? 0));
+		} catch (\Throwable $e) {
+			error_log('[cashpickup] Add form role check failed: ' . $e->getMessage());
+		}
+		$isManagerOrAdmin = user_can('is_manager') || user_can('is_admin') || $isOperationsManager || $isGeneralManager;
 		$prefillCustomer = null;
 		$prefillCustomerId = (int)($_GET['customer_id'] ?? 0);
 		$prefillPhone = trim((string)($_GET['phone'] ?? ''));
@@ -202,6 +214,17 @@
 		$receiveExistingReadonly = (empty($payout_mode) && $selectedCustomerType === 'existing' && $hasExistingCustomerPrefill);
 		$payoutPrefillReadonly = !empty($payout_mode);
 		$payoutPrefillHiddenClass = !empty($payout_mode) ? ' d-none js-payout-prefill-hidden' : '';
+		$transactionApprovers = [];
+		if (!user_can('is_admin')) {
+			try {
+				require_once plugin_path('helpers/permissions.php');
+				$approverSession = get_session();
+				$approverDb = new \Core\Database;
+				$transactionApprovers = \CashpickupPermissions\eligible_approvers($approverDb, (int)($approverSession->id ?? 0));
+			} catch (\Throwable $e) {
+				$transactionApprovers = [];
+			}
+		}
 	?>
 
 	<?php $hidePayoutForm = (!empty($payout_mode) && isset($remaining_balance) && (float)$remaining_balance <= 0.00001); ?>
@@ -254,7 +277,7 @@
 					<input class="form-control" type="text" value="<?=old_value('source')?>" readonly>
 					<input type="hidden" name="source" id="source" value="<?=old_value('source')?>">
 				<?php else: ?>
-					<?php if(user_can('is_manager') || user_can('is_admin')): ?>
+					<?php if($isManagerOrAdmin): ?>
 						<select class="form-select" name="source" id="source" required>
 							<option value="">---Select---</option>
 							<option <?=old_select('source','cash')?> value="cash">cash</option>
@@ -275,7 +298,7 @@
 
 			<div class="mb-3 col-12 col-md-6 js-side-both col-lg-3<?=$payoutPrefillHiddenClass?>">
 				<label for="amount_involved" class="form-label">Amount involved</label>
-				<?php if(empty($payout_mode) && (user_can('is_manager') || user_can('is_admin'))): ?>
+				<?php if(empty($payout_mode) && $isManagerOrAdmin): ?>
 					<label class="input-group js-side-receive" id="amountInvolvedReceiveWrap" style="display:none;">
 						<i class="fa-solid fa-calculator input-group-text text-warning" id="amountInvolvedReceiveCalcIcon" style="display:none;"></i>
 						<div class="input-group-text" id="amountInvolvedReceiveCurrencyPrefix">GHS</div>
@@ -297,7 +320,7 @@
 				<small class="text-danger"><?=(string)($errors['denos_json'] ?? '')?></small>
 			</div>
 
-			<?php if(empty($payout_mode) && (user_can('is_manager') || user_can('is_admin'))): ?>
+			<?php if(empty($payout_mode) && $isManagerOrAdmin): ?>
 				<div class="mb-3 col-md-12 col-lg-4 d-none" id="cashpickupSourceBankWrap">
 					<label class="form-label">Source bank</label>
 					<select class="form-select" name="account_paid_to" id="cashpickupSourceBank">
@@ -350,12 +373,30 @@
 				</select>
 			</div>
 
+			<?php if (!user_can('is_admin')): ?>
+				<div class="mb-3 col-md-12 col-lg-6">
+					<label for="approval_assigned_to" class="form-label">Assign approver</label>
+					<select name="approval_assigned_to" id="approval_assigned_to" class="form-select" required>
+						<option value="">---Select a superior approver---</option>
+						<?php foreach ($transactionApprovers as $approver): ?>
+							<?php $approverName = trim($approver->first_name . ' ' . $approver->last_name); ?>
+							<option value="<?=esc((string)$approver->id)?>" <?=((string)old_value('approval_assigned_to') === (string)$approver->id) ? 'selected' : ''?>>
+								<?=esc(($approverName !== '' ? $approverName : ('User #' . $approver->id)) . ' - ' . $approver->role_label)?>
+							</option>
+						<?php endforeach; ?>
+					</select>
+					<?php if (!empty($errors['approval_assigned_to'])): ?>
+						<small class="text-danger"><?=$errors['approval_assigned_to']?></small>
+					<?php endif; ?>
+				</div>
+			<?php endif; ?>
+
 			<div class="mb-3 col-12 js-side-receive" id="customerRegistrationNotice" style="display:none;">
 				<div class="alert customer-registration-notice mb-0">
-					<?php if(user_can('is_manager') || user_can('is_admin')): ?>
+					<?php if(user_can('is_admin')): ?>
 						Register the customer first. Once the registration is approved, you can return here and complete the cashpickup.
 					<?php else: ?>
-						Register the customer first. A manager or admin must approve the registration before cashpickup can be recorded.
+						Register the customer first. The assigned superior approver must approve the registration before cashpickup can be recorded.
 					<?php endif; ?>
 				</div>
 			</div>
@@ -759,7 +800,7 @@
 			const receiveProofEls = Array.from(document.querySelectorAll('.js-side-receive-proof'));
 			const sourceEl = document.getElementById('source');
 			const sourceBankEl = document.getElementById('cashpickupSourceBank');
-			const isManagerOrAdmin = <?=((user_can('is_manager') || user_can('is_admin')) ? 'true' : 'false')?>;
+			const isManagerOrAdmin = <?=($isManagerOrAdmin ? 'true' : 'false')?>;
 			const amountInvolvedReceiveWrap = document.getElementById('amountInvolvedReceiveWrap');
 			const amountInvolvedReceiveCalcIcon = document.getElementById('amountInvolvedReceiveCalcIcon');
 			const amountInvolvedReceiveCurrencyPrefix = document.getElementById('amountInvolvedReceiveCurrencyPrefix');

@@ -6,26 +6,21 @@
 	require_once plugin_path('helpers/transfer-allocation.php');
 	require_once plugin_path('helpers/customer-ledger.php');
 	require_once plugin_path('helpers/customer-assignment.php');
+	require_once plugin_path('helpers/permissions.php');
 	$isAjax = (string)($_GET['ajax'] ?? '') === '1';
 	$session = get_session();
 	$user_id = (int)($session->id ?? 0);
-	$isManagerOrAdmin = (user_can('is_manager') || user_can('is_admin'));
+	$isOperationsManager = false;
 	$isGeneralManager = false;
 	try {
 		$dbRole = new \Core\Database;
-		$gm = $dbRole->query(
-			"SELECT 1
-			 FROM user_roles_map urm
-			 JOIN user_roles ur ON ur.id = urm.role_id
-			 WHERE urm.disabled = 0
-			 AND urm.user_id = :uid
-			 AND LOWER(ur.role) IN ('general manager','general_manager','generalmanager','is_general_manager','operations manager','operations_manager')
-			 LIMIT 1",
-			['uid' => $user_id]
-		);
-		$isGeneralManager = !empty($gm);
-	} catch (\Throwable $e) {}
-	$canApproveDeny = (user_can('is_admin') || $isGeneralManager);
+		$isOperationsManager = \CashpickupPermissions\is_operations_manager($dbRole, $user_id);
+		$isGeneralManager = \CashpickupPermissions\is_general_manager($dbRole, $user_id);
+	} catch (\Throwable $e) {
+		error_log('[cashpickup] Approval role check failed: ' . $e->getMessage());
+	}
+	$isManagerOrAdmin = user_can('is_manager') || user_can('is_admin') || $isOperationsManager || $isGeneralManager;
+	$canApproveDeny = user_can('is_admin') || $isOperationsManager || $isGeneralManager;
 	$canViewAll = $isManagerOrAdmin;
 
 	$db = new \Core\Database;
@@ -137,6 +132,8 @@
 		COALESCE(SUM(amount_involved),0) AS total_amount,
 		COALESCE(SUM(CASE
 			WHEN LOWER(TRIM(COALESCE(cashpickups.credit_mode,''))) <> 'credit'
+				AND LOWER(TRIM(COALESCE(cashpickups.transaction_status,''))) NOT IN ('cancelled','canceled','denied','rejected')
+				AND LOWER(TRIM(COALESCE(cashpickups.approval_status,''))) NOT IN ('cancelled','canceled','denied','rejected')
 			THEN COALESCE(amount_involved,0)
 			ELSE 0
 		END),0) AS balance_received,
@@ -280,6 +277,8 @@
 	$rows = $db->query("SELECT m.*, cc.approval_status AS customer_approval_status,
 		u.first_name, u.last_name, u.image AS user_image,
 		au.first_name AS assigned_first_name, au.last_name AS assigned_last_name,
+		approval_user.first_name AS approval_assignee_first_name,
+		approval_user.last_name AS approval_assignee_last_name,
 		COALESCE(paid.paid_requested,0) AS paid_requested,
 		COALESCE(paid.paid_out,0) AS paid_out,
 		COALESCE(paid.parts,0) AS payout_parts,
@@ -292,6 +291,7 @@
 		LEFT JOIN cashpickup_customers AS cc ON cc.id = m.customer_id
 		LEFT JOIN users AS u ON m.created_by = u.id
 		LEFT JOIN users AS au ON m.assigned_user_id = au.id
+		LEFT JOIN users AS approval_user ON approval_user.id = m.approval_assigned_to AND approval_user.deleted = 0
 		{$trJoin}
 		LEFT JOIN (
 			SELECT receive_id,
@@ -557,7 +557,11 @@
 							if ($approvalStatus === '') $approvalStatus = 'pending';
 							$displayApprovalStatus = ($isCreditPayout && !in_array($approvalStatus, ['denied','reversed'], true) && !$fullyPaid) ? 'pending' : $approvalStatus;
 							$displayApprovalText = ($isCreditPayout && !in_array($approvalStatus, ['denied','reversed'], true) && !$fullyPaid) ? 'Pending payout' : ucfirst($displayApprovalStatus);
-							$canApproveThis = $canApproveDeny && $approvalStatus === 'pending' && !$isCreditPayout;
+							$approvalAssigneeId = (int)($r->approval_assigned_to ?? 0);
+							$canApproveThis = $canApproveDeny
+								&& $approvalStatus === 'pending'
+								&& !$isCreditPayout
+								&& $approvalAssigneeId === $user_id;
 							$customerApprovalStatus = strtolower(trim((string)($r->customer_approval_status ?? 'approved')));
 							$isNewCustomer = in_array($customerApprovalStatus, ['pending','draft'], true);
 							$transactionStatus = strtolower(trim((string)($r->transaction_status ?? '')));
@@ -603,6 +607,18 @@
 												<?php $assignedName = trim(((string)($r->assigned_first_name ?? '')).' '.((string)($r->assigned_last_name ?? ''))); ?>
 												<?php if($assignedName !== ''): ?>
 													<span>Assigned: <?=esc($assignedName)?></span>
+												<?php endif; ?>
+												<?php
+													$approvalAssigneeName = trim(
+														(string)($r->approval_assignee_first_name ?? '') . ' '
+														. (string)($r->approval_assignee_last_name ?? '')
+													);
+													if ($approvalAssigneeName === '' && (int)($r->approval_assigned_to ?? 0) > 0) {
+														$approvalAssigneeName = 'User #' . (int)$r->approval_assigned_to;
+													}
+												?>
+												<?php if($transactionNeedsAttention && $approvalAssigneeName !== ''): ?>
+													<span>Approver: <?=esc($approvalAssigneeName)?></span>
 												<?php endif; ?>
 												<?php if($assignmentRemaining > 0.00001): ?>
 													<span class="text-primary fw-semibold">Assigned payout remaining: GH₵ <?=number_format($assignmentRemaining, 2)?></span>
@@ -732,7 +748,11 @@
 									if ($approvalStatus === '') $approvalStatus = 'pending';
 									$displayApprovalStatus = ($isCreditPayout && !in_array($approvalStatus, ['denied','reversed'], true) && !$fullyPaid) ? 'pending' : $approvalStatus;
 									$displayApprovalText = ($isCreditPayout && !in_array($approvalStatus, ['denied','reversed'], true) && !$fullyPaid) ? 'Pending payout' : ucfirst($displayApprovalStatus);
-									$canApproveThis = $canApproveDeny && $approvalStatus === 'pending' && !$isCreditPayout;
+									$approvalAssigneeId = (int)($r->approval_assigned_to ?? 0);
+									$canApproveThis = $canApproveDeny
+										&& $approvalStatus === 'pending'
+										&& !$isCreditPayout
+										&& $approvalAssigneeId === $user_id;
 									$customerApprovalStatus = strtolower(trim((string)($r->customer_approval_status ?? 'approved')));
 									$isNewCustomer = in_array($customerApprovalStatus, ['pending','draft'], true);
 									$transactionStatus = strtolower(trim((string)($r->transaction_status ?? '')));
@@ -765,6 +785,18 @@
 													<span class="badge bg-warning text-dark"><?=esc($displayApprovalText)?></span>
 												<?php endif; ?>
 											</div>
+											<?php
+												$approvalAssigneeName = trim(
+													(string)($r->approval_assignee_first_name ?? '') . ' '
+													. (string)($r->approval_assignee_last_name ?? '')
+												);
+												if ($approvalAssigneeName === '' && (int)($r->approval_assigned_to ?? 0) > 0) {
+													$approvalAssigneeName = 'User #' . (int)$r->approval_assigned_to;
+												}
+											?>
+											<?php if($transactionNeedsAttention && $approvalAssigneeName !== ''): ?>
+												<div class="small text-body-secondary mt-1">Approver: <?=esc($approvalAssigneeName)?></div>
+											<?php endif; ?>
 										</td>
 										<td>
 											<div class="fw-semibold"><?=esc($r->source ?? '')?></div>
@@ -982,9 +1014,9 @@
 			<div class="col-12 col-lg-6 d-none d-lg-block">
 				<label class="form-label">Export / Apply</label>
 				<div class="cashpickup-toolbar-actions">
-					<a class="btn btn-outline-secondary" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(array_merge($exportBaseParams, ['format' => 'pdf']))?>"> <i class="fa-solid fa-file-pdf"></i> PDF</a>
-					<a class="btn btn-outline-success" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(array_merge($exportBaseParams, ['format' => 'xlsx']))?>"> <i class="fa-solid fa-file-excel"></i> Excel</a>
-					<a class="btn btn-outline-primary" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(array_merge($exportBaseParams, ['format' => 'csv']))?>"> <i class="fa-solid fa-file-csv"></i> CSV</a>
+					<a class="btn btn-outline-secondary" title="Export PDF" aria-label="Export PDF" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(array_merge($exportBaseParams, ['format' => 'pdf']))?>"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i></a>
+					<a class="btn btn-outline-success" title="Export Excel" aria-label="Export Excel" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(array_merge($exportBaseParams, ['format' => 'xlsx']))?>"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></a>
+					<a class="btn btn-outline-primary" title="Export CSV" aria-label="Export CSV" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(array_merge($exportBaseParams, ['format' => 'csv']))?>"><i class="fa-solid fa-file-csv" aria-hidden="true"></i></a>
 					<button id="cashpickupListApplyBtn" class="btn btn-primary" type="submit"><i class="fa fa-filter"></i> Apply</button>
 				</div>
 			</div>

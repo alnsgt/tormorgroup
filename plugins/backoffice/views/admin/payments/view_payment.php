@@ -113,6 +113,10 @@
 							<th class="text-muted">Amount: </th>
 							<td><?=number_format($row->amount ?? 0, 2)?></td>
 						</tr>	
+						<tr>
+							<th class="text-muted">Urgency:</th>
+							<td><?=backoffice_urgency_badge($row->urgency ?? 'Normal')?></td>
+						</tr>
 						<?php if($isBulkPaymentView): ?>
 							<tr><th colspan="2" class="text-warning text-uppercase">Bulk breakdown:</th></tr>
 							<tr class="wrap">

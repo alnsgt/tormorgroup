@@ -661,7 +661,16 @@ if (!function_exists('cfa_remove_cashdrawer_entries')) {
     }
 
     if (!function_exists('cfa_reverse_transaction_entries')) {
-        function cfa_reverse_transaction_entries(int $transId, int $actorUserId, string $timestamp): array
+        function cfa_reverse_transaction_entries(
+            int $transId,
+            int $actorUserId,
+            string $timestamp,
+            int $filterDrawerUserId = 0,
+            ?array $tables = null,
+            string $reversalStatus = 'Cancelled',
+            ?string $originalStatus = null,
+            bool $allowNegativeBalance = false
+        ): array
         {
             if ($transId <= 0) {
                 return ['ok' => false, 'message' => 'Missing CFA transaction reference.'];
@@ -676,19 +685,53 @@ if (!function_exists('cfa_remove_cashdrawer_entries')) {
             $affectedChannels = [];
 
             foreach ($entriesByTable as $table => $details) {
+                if ($tables !== null && !in_array($table, $tables, true)) {
+                    continue;
+                }
                 if (!$db->table_exists([$table])) {
                     continue;
                 }
                 $params = ['trans_id' => $transId];
+                $entryFilters = '';
+                if ($filterDrawerUserId > 0) {
+                    $entryFilters .= ' AND user_id = :drawer_user_id';
+                    $params['drawer_user_id'] = $filterDrawerUserId;
+                }
+                if ($originalStatus !== null) {
+                    $entryFilters .= " AND (
+                        LOWER(TRIM(COALESCE(trans_status,''))) = :original_status
+                        OR LOWER(TRIM(COALESCE(trans_status,''))) LIKE CONCAT('%: ', :original_status_suffix)
+                    )";
+                    $params['original_status'] = strtolower(trim($originalStatus));
+                    $params['original_status_suffix'] = strtolower(trim($originalStatus));
+                }
                 $currencyFilter = '';
                 if ($details['currency'] !== null) {
                     $currencyFilter = ' AND currency = :currency';
                     $params['currency'] = $details['currency'];
                 }
+                $reversalParams = ['trans_id' => $transId, 'reversal_status' => strtolower(trim($reversalStatus))];
+                $reversalUserFilter = '';
+                if ($filterDrawerUserId > 0) {
+                    $reversalUserFilter = ' AND user_id = :drawer_user_id';
+                    $reversalParams['drawer_user_id'] = $filterDrawerUserId;
+                }
+                $existingReversal = $db->query(
+                    "SELECT id FROM {$table}
+                     WHERE trans_id = :trans_id AND LOWER(TRIM(COALESCE(trans_status,''))) = :reversal_status{$reversalUserFilter}{$currencyFilter}
+                     LIMIT 1",
+                    $reversalParams + ($details['currency'] !== null ? ['currency' => $details['currency']] : [])
+                ) ?: [];
+                if ($db->has_error) {
+                    return ['ok' => false, 'message' => 'Unable to verify an existing cashdrawer reversal: ' . $db->error];
+                }
+                if (!empty($existingReversal)) {
+                    continue;
+                }
                 $entries = $db->query(
                     "SELECT drawer_id, user_id, denomination, `count`, volume" .
                     ($details['currency'] !== null ? ', currency' : '') .
-                    " FROM {$table} WHERE trans_id = :trans_id{$currencyFilter} ORDER BY id ASC",
+                    " FROM {$table} WHERE trans_id = :trans_id{$entryFilters}{$currencyFilter} ORDER BY id ASC",
                     $params
                 ) ?: [];
                 if ($db->has_error) {
@@ -697,16 +740,16 @@ if (!function_exists('cfa_remove_cashdrawer_entries')) {
 
                 foreach ($entries as $entry) {
                     $drawerId = (int)($entry->drawer_id ?? 0);
-                    $drawerUserId = (int)($entry->user_id ?? 0);
+                    $entryUserId = (int)($entry->user_id ?? 0);
                     $count = (int)($entry->count ?? 0);
                     $volume = (float)($entry->volume ?? 0);
-                    if ($drawerId <= 0 || $drawerUserId <= 0 || ($count === 0 && abs($volume) < 0.00001)) {
+                    if ($drawerId <= 0 || $entryUserId <= 0 || ($count === 0 && abs($volume) < 0.00001)) {
                         continue;
                     }
 
                     $balanceParams = [
                         'drawer_id' => $drawerId,
-                        'user_id' => $drawerUserId,
+                        'user_id' => $entryUserId,
                         'denomination' => $entry->denomination,
                     ];
                     if ($details['currency'] !== null) {
@@ -722,7 +765,7 @@ if (!function_exists('cfa_remove_cashdrawer_entries')) {
                         return ['ok' => false, 'message' => 'Unable to validate the CFA drawer balance: ' . $db->error];
                     }
                     $availableCount = (int)($balanceRows[0]->balance_count ?? 0);
-                    if ($availableCount - $count < 0) {
+                    if (!$allowNegativeBalance && $availableCount - $count < 0) {
                         return [
                             'ok' => false,
                             'message' => 'The cashdrawer no longer has the original denomination balance required to reverse this CFA transaction.',
@@ -731,14 +774,14 @@ if (!function_exists('cfa_remove_cashdrawer_entries')) {
 
                     $insertParams = [
                         'drawer_id' => $drawerId,
-                        'user_id' => $drawerUserId,
+                        'user_id' => $entryUserId,
                         'denomination' => $entry->denomination,
                         'count' => -$count,
                         'volume' => -$volume,
                         'date_created' => $timestamp,
                         'created_by' => $actorUserId,
                         'trans_id' => $transId,
-                        'trans_status' => 'Cancelled',
+                        'trans_status' => $reversalStatus,
                     ];
                     if ($details['currency'] !== null) {
                         $db->query(
@@ -758,10 +801,10 @@ if (!function_exists('cfa_remove_cashdrawer_entries')) {
                     if ($db->has_error) {
                         return ['ok' => false, 'message' => 'Unable to save the CFA drawer reversal: ' . $db->error];
                     }
-                    $key = $drawerId . ':' . $drawerUserId . ':' . $details['channel'];
+                    $key = $drawerId . ':' . $entryUserId . ':' . $details['channel'];
                     $affectedChannels[$key] = [
                         'drawer_id' => $drawerId,
-                        'user_id' => $drawerUserId,
+                        'user_id' => $entryUserId,
                         'channel' => $details['channel'],
                         'is_fx' => $details['currency'] !== null,
                         'currency' => $details['currency'] ?? 'GHS',
@@ -775,7 +818,7 @@ if (!function_exists('cfa_remove_cashdrawer_entries')) {
                     $channel['user_id'],
                     $channel['channel'],
                     $transId,
-                    'Cancelled',
+                    $reversalStatus,
                     $channel['is_fx'],
                     $channel['currency']
                 );

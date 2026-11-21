@@ -15,6 +15,7 @@ if(!empty($row))
 	date_default_timezone_set('Africa/Accra');
 
 	$postdata = $req->post();
+	$postdata['urgency'] = $postdata['urgency'] ?? ($row->urgency ?? 'Normal');
 	$payment = new \BackOffices\Payment;
 
 	$csrf = csrf_verify($postdata);
@@ -222,8 +223,8 @@ if(!empty($row))
 				'details' => [
 					'Network' => $postdata['network'] ?? ($row->network ?? ''),
 					'Payment type' => $postdata['payment_type'] ?? ($row->payment_type ?? ''),
+					'Urgency' => ($postdata['urgency'] ?? 'Normal') . ' - ' . backoffice_urgency_description((string)($postdata['urgency'] ?? 'Normal')),
 					'Amount' => 'GHS ' . number_format($amountValue, 2),
-					'Description' => $postdata['description'] ?? ($row->description ?? ''),
 				],
 				'view_url' => ROOT . '/admin/back_office/view_payment/' . (int)$row->id,
 			], $user_id);
@@ -380,7 +381,7 @@ if(!empty($row))
 	}
 
 	if(!$csrf)
-		$payment->errors['description'] = "Form expired!";
+		$payment->errors['form'] = "Form expired!";
 	
 	set_value('errors',$payment->errors);
 

@@ -1,6 +1,7 @@
 <?php
 
 require_once dirname(__DIR__) . '/users-manager/helpers/shared-account-assignments.php';
+require_once __DIR__ . '/helpers/channel-statement.php';
 
 /**
  * Plugin name: MyWallet
@@ -4269,6 +4270,47 @@ add_action('basic-admin_main_content',function(){
 				flush();
 			}
 			exit;
+		}else
+		if(URL(2) == 'view_channel_statement'){
+			try {
+				$channelStatement = operations_account_get_channel_statement(
+					(int)$id,
+					(string)($_GET['channel_type'] ?? ''),
+					(string)($_GET['channel_key'] ?? '')
+				);
+				$admin_route = $vars['admin_route'] ?? 'admin';
+				$plugin_route = $vars['plugin_route'] ?? 'operations_accounts';
+				require plugin_path('views/admin/cashdrawers/channel_statement.php');
+			} catch (\InvalidArgumentException $e) {
+				http_response_code(400);
+				echo '<div class="alert alert-danger">Invalid channel statement request.</div>';
+			} catch (\Throwable $e) {
+				error_log('[CashdrawerChannelStatement] ' . $e->getMessage());
+				if (http_response_code() !== 403) {
+					http_response_code(500);
+				}
+				echo '<div class="alert alert-danger">Unable to load this channel statement.</div>';
+			}
+		}else
+		if(URL(2) == 'export_channel_statement_pdf'){
+			try {
+				$channelStatement = operations_account_get_channel_statement(
+					(int)$id,
+					(string)($_GET['channel_type'] ?? ''),
+					(string)($_GET['channel_key'] ?? '')
+				);
+				require plugin_path('controllers/export_channel_statement_pdf-controller.php');
+				exit;
+			} catch (\InvalidArgumentException $e) {
+				http_response_code(400);
+				echo 'Invalid channel statement request.';
+			} catch (\Throwable $e) {
+				error_log('[CashdrawerChannelStatement] ' . $e->getMessage());
+				if (http_response_code() !== 403) {
+					http_response_code(500);
+				}
+				echo 'Unable to load this channel statement.';
+			}
 		}else
 		if(URL(2) == 'view_cashdrawer'){
 

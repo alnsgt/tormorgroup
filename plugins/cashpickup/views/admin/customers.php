@@ -75,6 +75,9 @@ else:
 		$sessionUserId = (int)($sesUser->id ?? 0);
 	} catch (\Throwable $e) {}
 	$canReviewCustomers = \CashpickupPermissions\is_top_authority($db, $sessionUserId);
+	$canApproveTransactions = user_can('is_admin')
+		|| \CashpickupPermissions\is_general_manager($db, $sessionUserId)
+		|| \CashpickupPermissions\is_operations_manager($db, $sessionUserId);
 	$canAssignCustomerPayout = false;
 	$canWithdrawCustomerPayout = false;
 	try {
@@ -233,8 +236,7 @@ else:
 					OR LOWER(TRIM(COALESCE(cp_attention.approval_status,''))) LIKE 'pending%')
 			)
 			OR (
-				COALESCE(credit_summary.credit_outstanding,0) > 0.00001
-				AND COALESCE(customer_balance.cash_balance,0) < -0.00001
+				COALESCE(customer_balance.cash_balance,0) < -0.00001
 			)
 			OR EXISTS (
 				SELECT 1
@@ -258,6 +260,26 @@ else:
 			)
 			AND (LOWER(TRIM(COALESCE(cp_assigned_attention.transaction_status,''))) LIKE 'pending%'
 				OR LOWER(TRIM(COALESCE(cp_assigned_attention.approval_status,''))) LIKE 'pending%')
+		)
+		OR (
+			COALESCE(customer_balance.cash_balance,0) < -0.00001
+			AND (
+				EXISTS (
+					SELECT 1
+					FROM cashpickup_customer_assignments ca_negative_attention
+					WHERE ca_negative_attention.customer_id = c.id
+					AND ca_negative_attention.assigned_user_id = {$sessionUserId}
+					AND LOWER(TRIM(COALESCE(ca_negative_attention.status,''))) = 'active'
+				)
+				OR EXISTS (
+					SELECT 1 FROM cashpickups cp_negative_attention
+					WHERE (cp_negative_attention.deleted IS NULL OR cp_negative_attention.deleted = 0)
+					AND cp_negative_attention.customer_id = c.id
+					AND cp_negative_attention.assigned_user_id = {$sessionUserId}
+					AND LOWER(TRIM(COALESCE(cp_negative_attention.transaction_status,''))) NOT IN ('cancelled','canceled','denied','rejected')
+					AND LOWER(TRIM(COALESCE(cp_negative_attention.approval_status,''))) NOT IN ('cancelled','canceled','denied','rejected')
+				)
+			)
 		)
 		OR EXISTS (
 			SELECT 1
@@ -360,6 +382,7 @@ else:
 		$rows = $db->query(
 			"SELECT DISTINCT c.*,
 			        TRIM(CONCAT_WS(' ', NULLIF(creator.first_name,''), NULLIF(creator.last_name,''))) AS creator_name,
+			        TRIM(CONCAT_WS(' ', NULLIF(approval_assignee.first_name,''), NULLIF(approval_assignee.last_name,''))) AS approval_assignee_name,
 			        0 AS tx_count,
 			        0 AS total_received,
 			        0 AS total_paid_out,
@@ -400,6 +423,7 @@ else:
 			        COALESCE(c.date_updated, c.date_created) AS last_updated
 			 FROM cashpickup_customers c
 			 LEFT JOIN users creator ON creator.id = CAST(NULLIF(c.created_by,'') AS UNSIGNED)
+			 LEFT JOIN users approval_assignee ON approval_assignee.id = c.approval_assigned_to AND approval_assignee.deleted = 0
 			 {$creditSummaryJoin}
 			 {$customerBalanceJoin}
 			 {$where}
@@ -424,12 +448,7 @@ else:
 					"SELECT
 						customer_id,
 						COUNT(*) AS tx_count,
-						COALESCE(SUM(CASE
-							WHEN LOWER(TRIM(COALESCE(transaction_side,''))) = 'receive'
-								AND LOWER(TRIM(COALESCE(credit_mode,''))) <> 'credit'
-							THEN amount_involved
-							ELSE 0
-						END),0) AS total_received,
+						COALESCE(SUM(" . \CashpickupLedger\statement_received_amount_sql('cashpickups') . "),0) AS total_received,
 						COALESCE(SUM(CASE
 							WHEN LOWER(TRIM(COALESCE(transaction_side,''))) = 'pay'
 								AND LOWER(TRIM(COALESCE(transaction_status,''))) = 'approved'
@@ -506,13 +525,16 @@ else:
 				}
 
 				$pendingRows = $db->query(
-					"SELECT DISTINCT cp.id, cp.customer_id, cp.transaction_side, cp.assigned_user_id, cp.created_by,
+					"SELECT DISTINCT cp.id, cp.customer_id, cp.transaction_side, cp.assigned_user_id, cp.approval_assigned_to,
 					        cp.source, cp.credit_mode, cp.approval_status, cp.transaction_status, cp.date_created,
 					        cp.amount_paid_out, cp.amount_involved, cp.pickup_charge,
 					        u.first_name AS assigned_first_name,
-					        u.last_name AS assigned_last_name
+					        u.last_name AS assigned_last_name,
+					        approval_assignee.first_name AS approval_assignee_first_name,
+					        approval_assignee.last_name AS approval_assignee_last_name
 					 FROM cashpickups cp
 					 LEFT JOIN users u ON u.id = cp.assigned_user_id
+					 LEFT JOIN users approval_assignee ON approval_assignee.id = cp.approval_assigned_to AND approval_assignee.deleted = 0
 					 WHERE (cp.deleted IS NULL OR cp.deleted = 0)
 					 AND cp.customer_id IN ({$customerIdList})
 					 AND (
@@ -537,7 +559,6 @@ else:
 						continue;
 					}
 					$assignedUserId = (int)($pendingRow->assigned_user_id ?? 0);
-					$createdById = (int)($pendingRow->created_by ?? 0);
 					$side = strtolower(trim((string)($pendingRow->transaction_side ?? '')));
 					$approval = strtolower(trim((string)($pendingRow->approval_status ?? '')));
 					$transactionStatus = strtolower(trim((string)($pendingRow->transaction_status ?? '')));
@@ -548,13 +569,18 @@ else:
 						&& (in_array($approval, ['pending', 'draft'], true) || str_starts_with($transactionStatus, 'pending'));
 					$firstName = trim((string)($pendingRow->assigned_first_name ?? ''));
 					$lastName = trim((string)($pendingRow->assigned_last_name ?? ''));
+					$approvalAssigneeId = (int)($pendingRow->approval_assigned_to ?? 0);
+					$approvalAssigneeName = trim(
+						(string)($pendingRow->approval_assignee_first_name ?? '') . ' '
+						. (string)($pendingRow->approval_assignee_last_name ?? '')
+					);
 					$amount = $side === 'pay'
 						? (float)($pendingRow->amount_paid_out ?? 0) + (float)($pendingRow->pickup_charge ?? 0)
 						: (float)($pendingRow->amount_involved ?? 0);
 					$pendingTaskSummaries[$customerId][] = [
 						'side' => $side,
 						'user_id' => $assignedUserId,
-						'created_by' => $createdById,
+						'approver_id' => $approvalAssigneeId,
 						'id' => (int)($pendingRow->id ?? 0),
 						'source' => (string)($pendingRow->source ?? ''),
 						'is_management_review' => $isManagementReview,
@@ -562,6 +588,9 @@ else:
 						'name' => $assignedUserId > 0
 							? (trim($firstName . ' ' . $lastName) ?: 'User #' . $assignedUserId)
 							: 'Not assigned — management review',
+						'approver' => $approvalAssigneeName !== ''
+							? $approvalAssigneeName
+							: ($approvalAssigneeId > 0 ? 'User #' . $approvalAssigneeId : ''),
 					];
 					if ($side === 'pay' && $assignedUserId > 0) {
 						$pendingPayoutReviewByCustomerUser[$customerId][$assignedUserId] = true;
@@ -596,20 +625,26 @@ else:
 				- (float)($customer->credit_balance_debit ?? 0);
 			$availableBalance = max(0.0, $balance);
 			$items = [];
+			$customerApproverId = (int)($customer->approval_assigned_to ?? 0);
 			if ($canReviewCustomers && $needsReview) {
 				$items[] = [
 					'task' => 'Customer registration needs approval.',
-					'assignee' => 'Admin / Operations Manager / General Manager',
+					'assignee' => 'Management review',
+					'approver' => trim((string)($customer->approval_assignee_name ?? ''))
+						?: ((int)($customer->approval_assigned_to ?? 0) > 0
+							? 'User #' . (int)$customer->approval_assigned_to
+							: ''),
+					'approver_id' => $customerApproverId,
 					'action' => 'approve_customer',
 				];
 			}
 
 			foreach ($pendingTaskSummaries[$customerId] ?? [] as $pendingTask) {
-				$isCreatorStatus = !$canReviewCustomers
-					&& !empty($pendingTask['is_management_review'])
-					&& $sessionUserId > 0
-					&& (int)($pendingTask['created_by'] ?? 0) === $sessionUserId;
-				if (!$canReviewCustomers && !$isCreatorStatus && (int)$pendingTask['user_id'] !== $sessionUserId) {
+				$isAssignedApprover = $canReviewCustomers
+					&& (int)($pendingTask['approver_id'] ?? 0) > 0
+					&& (int)$pendingTask['approver_id'] === $sessionUserId;
+				$isAssignedUser = (int)($pendingTask['user_id'] ?? 0) === $sessionUserId;
+				if (!$canReviewCustomers && !$isAssignedApprover && !$isAssignedUser) {
 					continue;
 				}
 				$sideLabel = $pendingTask['side'] === 'pay'
@@ -619,18 +654,26 @@ else:
 				$items[] = [
 					'task' => $sideLabel . ' GH₵ ' . number_format($amount, 2) . ' is '
 						. (!empty($pendingTask['is_management_review']) ? 'awaiting management review.' : 'pending.'),
-					'assignee' => $isCreatorStatus ? 'Management review' : $pendingTask['name'],
-					'action' => $isCreatorStatus ? 'status_only' : 'review_transaction',
+					'assignee' => $isAssignedApprover ? 'Management review' : $pendingTask['name'],
+					'approver' => (string)($pendingTask['approver'] ?? ''),
+					'action' => 'review_transaction',
+					'can_review' => $isAssignedApprover
+						|| $isAssignedUser
+						|| ($canApproveTransactions
+							&& (int)($pendingTask['approver_id'] ?? 0) <= 0
+							&& !empty($pendingTask['is_management_review'])),
 					'transaction_id' => (int)$pendingTask['id'],
 				];
 			}
 
 			$viewerAssignedBalance = 0.0;
 			foreach ($assignmentSummaries[$customerId] ?? [] as $assignment) {
-				if (!$canReviewCustomers && (int)$assignment['user_id'] !== $sessionUserId) {
+				$assignmentUserId = (int)$assignment['user_id'];
+				$isAssignedUser = $assignmentUserId === $sessionUserId;
+				if (!$isAssignedUser && !$canReviewCustomers) {
 					continue;
 				}
-				if (!empty($pendingPayoutReviewByCustomerUser[$customerId][(int)$assignment['user_id']])) {
+				if (!empty($pendingPayoutReviewByCustomerUser[$customerId][$assignmentUserId])) {
 					continue;
 				}
 				$available = min($availableBalance, (float)$assignment['remaining']);
@@ -639,24 +682,26 @@ else:
 						? 'Payout ready: GH₵ ' . number_format($available, 2) . ' available.'
 						: 'Assigned payout balance has no matching customer balance; reconcile before payout.',
 					'assignee' => $assignment['name'],
-					'user_id' => (int)$assignment['user_id'],
-					'action' => ((int)$assignment['user_id'] === $sessionUserId && $canWithdrawCustomerPayout && $available > 0.00001 && !$needsReview)
+					'user_id' => $assignmentUserId,
+					'action' => !$isAssignedUser
+						? 'status_only'
+						: ($canWithdrawCustomerPayout && $available > 0.00001 && !$needsReview
 						? 'pay_assigned'
-						: ($canAssignCustomerPayout ? 'manage_assignment' : 'review_ledger'),
+						: ($canAssignCustomerPayout ? 'manage_assignment' : 'review_ledger')),
 				];
-				if ((int)$assignment['user_id'] === $sessionUserId) {
+				if ($isAssignedUser) {
 					$viewerAssignedBalance += (float)$assignment['remaining'];
 				}
 			}
 
-			$creditOutstanding = max(0.0, (float)($customer->credit_outstanding ?? 0));
-			if ($canReviewCustomers && $creditOutstanding > 0.00001 && $balance < -0.00001) {
+			if ($balance < -0.00001 && (int)($customer->requires_attention ?? 0) === 1) {
 				$items[] = [
-					'task' => 'Credit repayment follow-up: GH₵ ' . number_format($creditOutstanding, 2) . ' outstanding.',
-					'assignee' => 'Management follow-up',
+					'task' => 'Customer balance is negative by GH₵ ' . number_format(abs($balance), 2) . '. Review the ledger and reconcile.',
+					'assignee' => '',
 					'action' => 'review_ledger',
 				];
 			}
+
 			if (empty($items)) {
 				continue;
 			}
@@ -770,30 +815,38 @@ else:
 		if (empty($attention['items'])) {
 			return;
 		}
-		$statusOnly = count(array_filter(
-			$attention['items'],
-			static fn($item) => ($item['action'] ?? '') !== 'status_only'
-		)) === 0;
 		?>
-		<div class="alert <?=$statusOnly ? 'alert-info border-info-subtle' : 'alert-warning border-warning-subtle'?> py-2 px-3 mt-2 mb-0 text-start">
+		<div class="alert alert-warning border-warning-subtle py-2 px-3 mt-2 mb-0 text-start">
 			<div class="fw-semibold small mb-1">
-				<i class="fa-solid <?=$statusOnly ? 'fa-circle-info' : 'fa-triangle-exclamation'?> me-1"></i>
-				<?=$statusOnly ? 'Transaction status' : 'Attention — next step'?>
+				<i class="fa-solid fa-triangle-exclamation me-1"></i>
+				Your next step
 			</div>
 			<ul class="small mb-1 ps-3">
 				<?php foreach($attention['items'] as $item): ?>
 					<li class="d-flex flex-wrap align-items-center gap-2 mb-1">
-						<span>
-							<?=esc((string)$item['task'])?>
-							<span class="text-body-secondary">Assigned to: <?=esc((string)$item['assignee'])?></span>
-						</span>
-						<?php if(($item['action'] ?? '') === 'approve_customer' && $canReviewCustomers): ?>
+						<span><?=esc((string)$item['task'])?></span>
+						<?php if(trim((string)($item['assignee'] ?? '')) !== '' || trim((string)($item['approver'] ?? '')) !== ''): ?>
+							<div class="d-flex flex-wrap gap-3 text-body-secondary small">
+								<?php if(trim((string)($item['assignee'] ?? '')) !== ''): ?>
+									<span>Assigned to: <?=esc((string)$item['assignee'])?></span>
+								<?php endif; ?>
+								<?php if(trim((string)($item['approver'] ?? '')) !== ''): ?>
+									<span>Approver: <?=esc((string)$item['approver'])?></span>
+								<?php endif; ?>
+							</div>
+						<?php endif; ?>
+						<?php if(($item['action'] ?? '') === 'approve_customer'
+							&& $canReviewCustomers
+							&& (int)($item['approver_id'] ?? 0) > 0
+							&& (int)$item['approver_id'] === $sessionUserId): ?>
 							<form method="post" action="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/customer_approve/<?=$customerId?>" class="d-inline">
 								<?=csrf()?>
 								<input type="hidden" name="customer_id" value="<?=$customerId?>">
 								<button class="btn btn-sm btn-success" type="submit"><i class="fa fa-check me-1" aria-hidden="true"></i>Approve</button>
 							</form>
-						<?php elseif(($item['action'] ?? '') === 'review_transaction' && (int)($item['transaction_id'] ?? 0) > 0): ?>
+						<?php elseif(($item['action'] ?? '') === 'review_transaction'
+							&& !empty($item['can_review'])
+							&& (int)($item['transaction_id'] ?? 0) > 0): ?>
 							<a class="btn btn-sm btn-outline-primary" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/view/<?=esc((string)$item['transaction_id'])?>">
 								<i class="fa fa-eye me-1" aria-hidden="true"></i>Review transaction
 							</a>
@@ -919,6 +972,11 @@ else:
 							$approvalStatus = strtolower(trim((string)($c->approval_status ?? 'approved')));
 							if ($approvalStatus === '') $approvalStatus = 'approved';
 							$needsReview = in_array($approvalStatus, ['pending', 'draft'], true);
+							$approvalAssigneeId = (int)($c->approval_assigned_to ?? 0);
+							$canApproveCustomer = $canReviewCustomers
+								&& $needsReview
+								&& $approvalAssigneeId > 0
+								&& $approvalAssigneeId === $sessionUserId;
 							$requiresAttention = !empty($c->requires_attention) && (int)$c->requires_attention === 1;
 							$customerName = trim((string)($c->full_name ?? ''));
 							$customerPhone = trim((string)($c->phone_number ?? ''));
@@ -929,6 +987,10 @@ else:
 								$creatorId = (int)($c->created_by ?? 0);
 								$creatorName = $creatorId > 0 ? 'User #' . $creatorId : (trim((string)($c->created_by ?? '')) ?: 'Unknown');
 							}
+							$approvalAssigneeName = trim((string)($c->approval_assignee_name ?? ''));
+							if ($approvalAssigneeName === '' && (int)($c->approval_assigned_to ?? 0) > 0) {
+								$approvalAssigneeName = 'User #' . (int)$c->approval_assigned_to;
+							}
 							$customerAttention = $attentionByCustomer[$customerId] ?? [];
 							$lastTransaction = (string)(get_date_time($c->last_tx ?? '---'));
 						?>
@@ -936,17 +998,23 @@ else:
 							<div class="card-body">
 								<div class="d-flex justify-content-between align-items-start gap-2">
 									<div class="cashpickup-customer-mobile-heading">
-										<div class="fw-semibold text-break"><?=esc($customerName !== '' ? $customerName : 'Unnamed customer')?></div>
+										<div class="d-flex align-items-center gap-1">
+											<div class="fw-semibold text-break"><?=esc($customerName !== '' ? $customerName : 'Unnamed customer')?></div>
+											<?php if($approvalStatus === 'approved'): ?>
+												<span class="text-success flex-shrink-0" title="Verified" aria-label="Verified"><i class="fa-solid fa-circle-check" aria-hidden="true"></i><span class="visually-hidden">Verified</span></span>
+											<?php endif; ?>
+										</div>
 										<div class="small text-body-secondary">Customer #<?=$customerId?></div>
 										<div class="small text-body-secondary">Registered by: <?=esc($creatorName)?></div>
+										<?php if($approvalAssigneeName !== ''): ?>
+											<div class="small text-body-secondary">Approver: <?=esc($approvalAssigneeName)?></div>
+										<?php endif; ?>
 									</div>
 									<div class="d-flex flex-wrap justify-content-end gap-1">
 										<?php if($needsReview && $canReviewCustomers): ?>
 											<span class="badge text-bg-warning">Needs approval</span>
 										<?php elseif($needsReview): ?>
 											<span class="badge text-bg-secondary">Pending</span>
-										<?php elseif($approvalStatus === 'approved'): ?>
-											<span class="badge text-bg-success">Approved</span>
 										<?php elseif($approvalStatus === 'denied'): ?>
 											<span class="badge text-bg-danger">Denied</span>
 										<?php else: ?>
@@ -987,7 +1055,7 @@ else:
 									</div>
 									<div class="cashpickup-customer-mobile-actions justify-content-end">
 										<a class="btn btn-icon btn-outline-primary" title="View customer" aria-label="View customer" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/customer/<?=$customerId?>"><i class="fa fa-eye"></i></a>
-										<?php if($canReviewCustomers && $needsReview): ?>
+										<?php if($canApproveCustomer): ?>
 											<form method="post" action="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/customer_approve/<?=$customerId?>">
 												<?=csrf()?>
 												<input type="hidden" name="customer_id" value="<?=$customerId?>">
@@ -1027,13 +1095,12 @@ else:
 							<th>Activity</th>
 							<th class="text-end">Deposits / paid out</th>
 							<th class="text-end">Balance / credit due</th>
-							<th>Status</th>
 							<th class="text-end">Actions</th>
 						</tr>
 					</thead>
 					<tbody>
 						<?php if(empty($rows)): ?>
-							<tr><td colspan="8" class="text-center text-muted"><?=$activeTab === 'new' ? 'No customer registrations need approval.' : 'No customers found.'?></td></tr>
+							<tr><td colspan="7" class="text-center text-muted"><?=$activeTab === 'new' ? 'No customer registrations need approval.' : 'No customers found.'?></td></tr>
 						<?php else: ?>
 							<?php foreach($rows as $idx => $c): ?>
 								<?php
@@ -1043,6 +1110,12 @@ else:
 									$creditOutstanding = (float)($c->credit_outstanding ?? 0);
 									$approvalStatus = strtolower(trim((string)($c->approval_status ?? 'approved')));
 									if ($approvalStatus === '') $approvalStatus = 'approved';
+									$needsReview = in_array($approvalStatus, ['pending', 'draft'], true);
+									$approvalAssigneeId = (int)($c->approval_assigned_to ?? 0);
+									$canApproveCustomer = $canReviewCustomers
+										&& $needsReview
+										&& $approvalAssigneeId > 0
+										&& $approvalAssigneeId === $sessionUserId;
 									$requiresAttention = !empty($c->requires_attention) && (int)$c->requires_attention === 1;
 									$customerName = trim((string)($c->full_name ?? ''));
 									$customerPhone = trim((string)($c->phone_number ?? ''));
@@ -1053,6 +1126,10 @@ else:
 										$creatorId = (int)($c->created_by ?? 0);
 										$creatorName = $creatorId > 0 ? 'User #' . $creatorId : (trim((string)($c->created_by ?? '')) ?: 'Unknown');
 									}
+									$approvalAssigneeName = trim((string)($c->approval_assignee_name ?? ''));
+									if ($approvalAssigneeName === '' && (int)($c->approval_assigned_to ?? 0) > 0) {
+										$approvalAssigneeName = 'User #' . (int)$c->approval_assigned_to;
+									}
 									$customerAttention = $attentionByCustomer[$customerId] ?? [];
 									$lastTransaction = (string)(get_date_time($c->last_tx ?? '---'));
 								?>
@@ -1061,6 +1138,9 @@ else:
 									<td>
 										<div class="d-flex align-items-center gap-2">
 								<div class="fw-semibold"><?=esc($customerName !== '' ? $customerName : '***')?></div>
+								<?php if($approvalStatus === 'approved'): ?>
+									<span class="text-success flex-shrink-0" title="Verified" aria-label="Verified"><i class="fa-solid fa-circle-check" aria-hidden="true"></i><span class="visually-hidden">Verified</span></span>
+								<?php endif; ?>
 								<?php if ($requiresAttention): ?>
 									<span class="badge bg-danger text-white">Attention</span>
 								<?php endif; ?>
@@ -1068,6 +1148,9 @@ else:
 							<?php $renderAttentionCard($customerId); ?>
 										<div class="small text-muted"><i class="fa fa-phone me-1"></i><?=esc($customerPhone !== '' ? $customerPhone : '***')?></div>
 										<div class="small text-muted"><i class="fa fa-user-plus me-1"></i>Registered by: <?=esc($creatorName)?></div>
+										<?php if($approvalAssigneeName !== ''): ?>
+											<div class="small text-muted"><i class="fa fa-user-check me-1"></i>Approver: <?=esc($approvalAssigneeName)?></div>
+										<?php endif; ?>
 										<div class="small text-muted"><i class="fa fa-location-dot me-1"></i><?=esc($customerLocation !== '' ? $customerLocation : '***')?></div>
 									</td>
 									<td>
@@ -1086,20 +1169,9 @@ else:
 										<div><span>Balance</span><strong class="<?=($balance < 0) ? 'text-danger' : 'text-body'?>"><?=number_format((float)$balance, 2)?></strong></div>
 										<div><span>Credit due</span><strong class="<?=($creditOutstanding > 0) ? 'text-warning-emphasis' : 'text-body'?>"><?=number_format($creditOutstanding, 2)?></strong></div>
 									</td>
-									<td>
-										<?php if($approvalStatus === 'approved'): ?>
-											<span class="badge bg-success">Approved</span>
-										<?php elseif($approvalStatus === 'reversed'): ?>
-											<span class="badge bg-danger">Reversed</span>
-										<?php elseif($approvalStatus === 'denied'): ?>
-											<span class="badge bg-danger">Denied</span>
-										<?php else: ?>
-											<span class="badge bg-warning text-dark">Pending</span>
-										<?php endif; ?>
-									</td>
 									<td class="text-end">
 										<a class="btn btn-icon btn-outline-primary" title="View" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/customer/<?=esc((string)($c->id ?? 0))?>"><i class="fa fa-eye"></i></a>
-										<?php if($canReviewCustomers && in_array($approvalStatus, ['pending','draft'], true)): ?>
+										<?php if($canApproveCustomer): ?>
 											<form method="post" action="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/customer_approve/<?=esc((string)($c->id ?? 0))?>" class="d-inline">
 												<?=csrf()?>
 												<input type="hidden" name="customer_id" value="<?=esc((string)($c->id ?? 0))?>">
@@ -1717,10 +1789,45 @@ else:
 		.cashpickup-crm .crm-hero{border-radius:.75rem}
 		.cashpickup-crm .crm-metric-card{padding:.8rem}
 	}
-	@media(max-width:767.98px){
+	@media(max-width:991.98px){
 		.cashpickup-customers-header{flex-direction:column}
-		.cashpickup-customers-header-actions{display:flex;justify-content:flex-start;width:100%}
-		.cashpickup-customers-header-actions .btn{width:auto;flex:0 1 auto;padding:.35rem .55rem}
+		.cashpickup-customers-header-actions{
+			display:flex;
+			flex-wrap:wrap;
+			justify-content:flex-start;
+			width:100%;
+		}
+		.cashpickup-customers-header-actions .btn{
+			display:inline-flex;
+			align-items:center;
+			justify-content:center;
+			gap:.4rem;
+			min-height:2.75rem;
+			padding:.5rem .65rem;
+			white-space:normal;
+			text-align:center;
+			line-height:1.2;
+			border-radius:.75rem;
+			box-shadow:0 .15rem .4rem rgba(15,23,42,.06);
+			transition:transform .15s ease,box-shadow .15s ease;
+		}
+		.cashpickup-customers-header-actions .cashpickup-header-export{
+			width:2.75rem;
+			min-width:2.75rem;
+			padding:.5rem;
+		}
+		.cashpickup-customers-header-actions .btn:active{transform:scale(.98)}
+	}
+	@media(hover:hover) and (pointer:fine) and (max-width:991.98px){
+		.cashpickup-customers-header-actions .btn:hover{
+			transform:translateY(-1px);
+			box-shadow:0 .35rem .8rem rgba(15,23,42,.12);
+		}
+	}
+	@media(prefers-reduced-motion:reduce){
+		.cashpickup-customers-header-actions .btn{transition:none}
+		.cashpickup-customers-header-actions .btn:active,
+		.cashpickup-customers-header-actions .btn:hover{transform:none}
 	}
 </style>
 
@@ -1741,11 +1848,10 @@ else:
 			</a>
 			<?php endif; ?>
 			<?php if(!$isNonPrivileged): ?>
-			<a class="btn btn-outline-primary" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/customers?sync=1"> <i class="fa-solid fa-sync"></i> Sync Ledger</a>
 			<?php $exportResource = $activeTab === 'gl' ? 'general_ledger' : ($activeTab === 'crm' ? 'crm' : 'customers'); ?>
-			<a class="btn btn-outline-danger" id="customersExportPdf" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => $exportResource, 'format' => 'pdf', 'find' => $find, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'service' => $service, 'agent_id' => $agentId])?>"> <i class="fa-solid fa-file-pdf"></i> PDF</a>
-			<a class="btn btn-outline-success" id="customersExportXlsx" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => $exportResource, 'format' => 'xlsx', 'find' => $find, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'service' => $service, 'agent_id' => $agentId])?>"> <i class="fa-solid fa-file-excel"></i> Excel</a>
-			<a class="btn btn-outline-primary" id="customersExportCsv" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => $exportResource, 'format' => 'csv', 'find' => $find, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'service' => $service, 'agent_id' => $agentId])?>"> <i class="fa-solid fa-file-csv"></i> CSV</a>
+			<a class="btn btn-outline-danger cashpickup-header-export" id="customersExportPdf" title="Export PDF" aria-label="Export PDF" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => $exportResource, 'format' => 'pdf', 'find' => $find, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'service' => $service, 'agent_id' => $agentId])?>"><i class="fa-solid fa-file-pdf"></i></a>
+			<a class="btn btn-outline-success cashpickup-header-export" id="customersExportXlsx" title="Export Excel" aria-label="Export Excel" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => $exportResource, 'format' => 'xlsx', 'find' => $find, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'service' => $service, 'agent_id' => $agentId])?>"><i class="fa-solid fa-file-excel"></i></a>
+			<a class="btn btn-outline-primary cashpickup-header-export" id="customersExportCsv" title="Export CSV" aria-label="Export CSV" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query(['resource' => $exportResource, 'format' => 'csv', 'find' => $find, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'service' => $service, 'agent_id' => $agentId])?>"><i class="fa-solid fa-file-csv"></i></a>
 			<?php endif; ?>
 	</div>
 </div>

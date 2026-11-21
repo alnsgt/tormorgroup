@@ -1,6 +1,7 @@
 <?php
 
 require_once plugin_path('helpers/customer-ledger.php');
+require_once plugin_path('helpers/permissions.php');
 $transferHelperPath = realpath(__DIR__ . '/../helpers/transfer-allocation.php');
 if ($transferHelperPath && file_exists($transferHelperPath)) {
 	require_once $transferHelperPath;
@@ -94,6 +95,26 @@ if (array_key_exists('assigned_user_id', $postdata)) {
 }
 
 $side = strtolower(trim((string)($postdata['transaction_side'] ?? '')));
+$approvalAssigneeId = (int)($postdata['approval_assigned_to'] ?? 0);
+$sessionForApproval = get_session();
+$approvalActorId = (int)($sessionForApproval->id ?? 0);
+$isAdminActor = user_can('is_admin');
+if (!$isAdminActor) {
+	try {
+		$dbApprover = new \Core\Database;
+		if (!\CashpickupPermissions\is_eligible_approver($dbApprover, $approvalActorId, $approvalAssigneeId)) {
+			$cashpickup->errors['approval_assigned_to'] = 'Select a superior role to approve this transaction.';
+			set_value('errors', array_merge($cashpickup->errors, $req->upload_errors));
+			return;
+		}
+	} catch (\Throwable $e) {
+		error_log('[cashpickup] Approval assignment validation failed: ' . $e->getMessage());
+		$cashpickup->errors['approval_assigned_to'] = 'Unable to verify the selected approver.';
+		set_value('errors', array_merge($cashpickup->errors, $req->upload_errors));
+		return;
+	}
+}
+$postdata['approval_assigned_to'] = $isAdminActor ? null : $approvalAssigneeId;
 $customerType = strtolower(trim((string)($postdata['customer_type'] ?? 'existing')));
 if (!in_array($customerType, ['existing', 'new'], true)) {
 	$customerType = 'existing';
@@ -130,7 +151,9 @@ if ($side === 'receive') {
 	}
 
 	$src = strtolower(trim((string)($postdata['source'] ?? '')));
-	$isManagerOrAdmin = (user_can('is_manager') || user_can('is_admin'));
+	$isManagerOrAdmin = user_can('is_manager') || user_can('is_admin')
+		|| \CashpickupPermissions\is_operations_manager($dbSchema, $approvalActorId)
+		|| \CashpickupPermissions\is_general_manager($dbSchema, $approvalActorId);
 	if ($customerType !== 'new') {
 		if($isManagerOrAdmin){
 			$allowed = ['cash','mtn','at','telecel','bank'];
@@ -496,7 +519,7 @@ if ($side === 'receive' && $customerType === 'new') {
 		$customerDb = new \Core\Database;
 		\CashpickupLedger\ensure_cashpickup_customer_schema($customerDb);
 		\CashpickupLedger\ensure_cashpickup_customer_approval_columns($customerDb);
-		$isApprover = (user_can('is_admin') || user_can('is_manager'));
+		$isApprover = user_can('is_admin');
 		$sessionCustomer = get_session();
 		$customerActorId = (int)($sessionCustomer->id ?? 0);
 		$customer = \CashpickupLedger\upsert_customer([
@@ -508,15 +531,28 @@ if ($side === 'receive' && $customerType === 'new') {
 		], $customerActorId, $customerDb, [
 			'approval_status' => $isApprover ? 'approved' : 'pending',
 			'approved_by' => $isApprover ? $customerActorId : null,
+			'approval_assigned_to' => $isApprover ? null : $approvalAssigneeId,
 		]);
 		if (empty($customer['id'])) {
 			throw new \RuntimeException('Unable to save customer registration.');
 		}
 		if ($isApprover) {
+			\CashpickupActivity\record(
+				'registered',
+				$customerActorId,
+				'Customer #' . (int)$customer['id'] . ' registered from cashpickup entry.',
+				'cashpickup_customers'
+			);
 			message_success('Customer registered and approved. Continue with the cashpickup for this customer.');
 			redirect($admin_route . '/' . $plugin_route . '/add?customer_id=' . (int)$customer['id']);
 		}
-		message_success('Customer registration submitted for approval. A manager or admin must approve before cashpickup can be recorded.');
+		\CashpickupActivity\record(
+			'registered',
+			$customerActorId,
+			'Customer #' . (int)$customer['id'] . ' registration submitted from cashpickup entry.',
+			'cashpickup_customers'
+		);
+		message_success('Customer registration submitted for approval. The assigned approver must approve before cashpickup can be recorded.');
 		redirect($admin_route . '/' . $plugin_route . '/customers');
 	} catch (\Throwable $e) {
 		$cashpickup->errors['phone_number'] = 'Unable to submit customer registration.';
@@ -653,23 +689,8 @@ if ($csrf && $cashpickup->validate_insert($postdata))
 		}
 
 		// Approval workflow: pending for non-admin/general manager
-		$isPrivileged = (user_can('is_admin'));
-		$isGeneralManager = false;
-		try {
-			$dbRole = new \Core\Database;
-			$gm = $dbRole->query(
-				"SELECT 1
-				 FROM user_roles_map urm
-				 JOIN user_roles ur ON ur.id = urm.role_id
-				 WHERE urm.disabled = 0
-				 AND urm.user_id = :uid
-				 AND LOWER(ur.role) IN ('general manager','general_manager','generalmanager','gm','is_general_manager')
-				 LIMIT 1",
-				['uid' => (int)$user_id]
-			);
-			$isGeneralManager = !empty($gm);
-		} catch (\Throwable $e) {}
-		$postdata['approval_status'] = ($isPrivileged || $isGeneralManager) ? 'approved' : 'pending';
+		$isPrivileged = user_can('is_admin');
+		$postdata['approval_status'] = $isPrivileged ? 'approved' : 'pending';
 		
 		// Only set approved_by and approved_at if actually approved by admin/manager
 		if ($postdata['approval_status'] === 'approved') {
@@ -681,13 +702,9 @@ if ($csrf && $cashpickup->validate_insert($postdata))
 		}
 
 		// Set transaction_status based on approval_status
-		if (!isset($postdata['transaction_status']) || $postdata['transaction_status'] === '') {
-			if ($postdata['approval_status'] === 'approved') {
-				$postdata['transaction_status'] = 'Approved';
-			} else {
-				$postdata['transaction_status'] = $side === 'receive' ? 'Pending receive' : 'Pending payout';
-			}
-		}
+		$postdata['transaction_status'] = $postdata['approval_status'] === 'approved'
+			? 'Approved'
+			: ($side === 'receive' ? 'Pending receive' : 'Pending payout');
 
 		// Validate cash payout denominations exist in user's cashdrawer
 		// Only validate/mutate cashdrawer once payout is approved
@@ -1397,7 +1414,7 @@ if ($csrf && $cashpickup->validate_insert($postdata))
 		$notificationRecipients = \cashpickup_whatsapp_participant_ids(
 			$postdata,
 			array_merge(
-				[(int)$user_id],
+				[(int)$user_id, $approvalAssigneeId, (int)($postdata['assigned_user_id'] ?? 0)],
 				\cashpickup_whatsapp_approver_ids()
 			)
 		);
@@ -1420,6 +1437,11 @@ if ($csrf && $cashpickup->validate_insert($postdata))
 			$admin_route.'/'.$plugin_route.'/view/'.(int)($postdata['id'] ?? 0)
 		);
 
+		\CashpickupActivity\record(
+			'added',
+			(int)$user_id,
+			'Cashpickup transaction #' . (int)($postdata['id'] ?? 0) . ' recorded (' . $side . ', amount ' . number_format((float)($postdata['amount_involved'] ?? 0), 2, '.', '') . ').'
+		);
 		message_success("Cash pickup recorded successfully!");
 		redirect($admin_route.'/'.$plugin_route);
 	}

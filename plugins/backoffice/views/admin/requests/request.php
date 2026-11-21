@@ -1,3 +1,4 @@
+<link rel="stylesheet" href="<?=ROOT?>/plugins/backoffice/assets/css/select-badges.css">
 <style type="text/css">
 	thead tr{
 		white-space: nowrap;
@@ -71,39 +72,194 @@
 	}
 
 	/* metrics cards */
-	#bo-req-metrics .metric-card{
-		border: none;
-		background: linear-gradient(135deg, #facc15 0%, #fed7aa 40%, #fff7ed 100%);
-		box-shadow: 0 4px 14px rgba(0,0,0,.08);
-		color: #111827;
+	#bo-req-metrics{
+		--metric-bg: var(--bs-body-bg, #fff);
+		--metric-border: var(--bs-border-color, #e2e8f0);
+		--metric-text: var(--bs-body-color, #1f2937);
+		--metric-muted: var(--bs-secondary-color, #64748b);
+		--metric-primary: var(--bs-primary, #2563eb);
+		--metric-primary-rgb: var(--bs-primary-rgb, 37, 99, 235);
+		--metric-count: #0e7490;
+		--metric-count-rgb: 14, 116, 144;
+		--metric-pending: #b45309;
+		--metric-pending-rgb: 180, 83, 9;
+		--metric-approved: #15803d;
+		--metric-approved-rgb: 21, 128, 61;
+		--metric-danger: var(--bs-danger, #dc3545);
+		--metric-danger-rgb: var(--bs-danger-rgb, 220, 53, 69);
+		--metric-shadow-rgb: 15, 23, 42;
 	}
 
-	#bo-req-metrics .metric-card.metric-accent{
-		background: linear-gradient(135deg, #0f172a 0%, #1e293b 45%, #020617 100%);
-		color: #f9fafb;
+	html[data-bs-theme="dark"] #bo-req-metrics,
+	body[data-bs-theme="dark"] #bo-req-metrics,
+	body.dark-mode #bo-req-metrics{
+		--metric-bg: #1f2937;
+		--metric-border: #374151;
+		--metric-text: #f3f4f6;
+		--metric-muted: #9ca3af;
+		--metric-primary: #93c5fd;
+		--metric-primary-rgb: 147, 197, 253;
+		--metric-count: #67e8f9;
+		--metric-count-rgb: 103, 232, 249;
+		--metric-pending: #fcd34d;
+		--metric-pending-rgb: 252, 211, 77;
+		--metric-approved: #86efac;
+		--metric-approved-rgb: 134, 239, 172;
+		--metric-danger: #fca5a5;
+		--metric-danger-rgb: 252, 165, 165;
+		--metric-shadow-rgb: 0, 0, 0;
+	}
+
+	#bo-req-metrics .metric-card{
+		--metric-accent: var(--metric-primary);
+		--metric-accent-rgb: var(--metric-primary-rgb);
+		position: relative;
+		overflow: hidden;
+		isolation: isolate;
+		min-height: 6rem;
+		padding: .9rem 1rem !important;
+		border: 1px solid rgba(var(--metric-accent-rgb), .25) !important;
+		border-radius: 1rem !important;
+		background-color: var(--metric-bg) !important;
+		background-image: radial-gradient(circle at 100% 0%, rgba(var(--metric-accent-rgb), .14), transparent 58%);
+		box-shadow: 0 8px 22px rgba(var(--metric-shadow-rgb), .08), inset 0 1px 0 rgba(255, 255, 255, .42);
+		color: var(--metric-text);
+		transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+	}
+
+	#bo-req-metrics .metric-card::before{
+		position: absolute;
+		z-index: -1;
+		top: .85rem;
+		bottom: .85rem;
+		left: 0;
+		width: 3px;
+		border-radius: 0 999px 999px 0;
+		background: var(--metric-accent);
+		content: "";
+	}
+
+	#bo-req-metrics .metric-card:hover{
+		transform: translateY(-3px);
+		border-color: rgba(var(--metric-accent-rgb), .42) !important;
+		box-shadow: 0 14px 30px rgba(var(--metric-shadow-rgb), .14);
+	}
+
+	#bo-req-metrics .metric-card--count{
+		--metric-accent: var(--metric-count);
+		--metric-accent-rgb: var(--metric-count-rgb);
+	}
+
+	#bo-req-metrics .metric-card--pending{
+		--metric-accent: var(--metric-pending);
+		--metric-accent-rgb: var(--metric-pending-rgb);
+	}
+
+	#bo-req-metrics .metric-card--approved{
+		--metric-accent: var(--metric-approved);
+		--metric-accent-rgb: var(--metric-approved-rgb);
+	}
+
+	#bo-req-metrics .metric-card--rejected{
+		--metric-accent: var(--metric-danger);
+		--metric-accent-rgb: var(--metric-danger-rgb);
+	}
+
+	#bo-req-metrics .metric-card > *{
+		position: relative;
+		z-index: 1;
 	}
 
 	#bo-req-metrics .metric-label{
-		font-size: .7rem;
-		letter-spacing: .08em;
+		font-size: .68rem;
+		font-weight: 650;
+		letter-spacing: .07em;
 		text-transform: uppercase;
-		color: #111827 !important;
+		color: var(--metric-muted) !important;
 	}
 
-	body[data-bs-theme="dark"] #bo-req-metrics .metric-label,
-	body.dark-mode #bo-req-metrics .metric-label{
-		color: #000000ff !important;
+	#bo-req-metrics .metric-value{
+		color: var(--metric-accent) !important;
+		font-size: 1.25rem;
+		font-weight: 750;
+		letter-spacing: -.035em;
+		line-height: 1.15;
 	}
 
-	#bo-req-metrics .metric-trend{
+	#bo-req-metrics .metric-icon{
+		display: inline-flex;
+		width: 2rem;
+		height: 2rem;
+		flex: 0 0 2rem;
+		align-items: center;
+		justify-content: center;
+		border: 1px solid rgba(var(--metric-accent-rgb), .14);
+		border-radius: .7rem;
+		background: rgba(var(--metric-accent-rgb), .12);
+		color: var(--metric-accent);
+		font-size: .82rem;
+	}
+
+	#bo-req-metrics .metric-card--compact{
+		min-height: 5.2rem;
+		padding: .75rem .85rem !important;
+	}
+
+	#bo-req-metrics .metric-card--compact .metric-label{
+		font-size: .61rem;
+		letter-spacing: .045em;
+	}
+
+	#bo-req-metrics .metric-card--compact .metric-icon{
+		width: 1.65rem;
+		height: 1.65rem;
+		flex-basis: 1.65rem;
+		border-radius: .58rem;
 		font-size: .7rem;
-		color: #1f2933 !important;
+	}
+
+	#bo-req-metrics .metric-card--compact .metric-value{
+		font-size: 1.08rem;
+	}
+
+	#bo-req-metrics .metric-trend,
+	#bo-req-metrics .metric-scope-label{
+		color: var(--metric-muted) !important;
+		font-size: .68rem;
+	}
+
+	#bo-req-metrics .metric-card .text-primary,
+	#bo-req-metrics .metric-card .text-warning{
+		color: var(--metric-primary) !important;
+	}
+
+	#bo-req-metrics .metric-card .text-success{
+		color: var(--metric-success) !important;
+	}
+
+	#bo-req-metrics .metric-card .text-danger{
+		color: var(--metric-danger) !important;
+	}
+
+	#bo-req-metrics #bo-req-scope-label{
+		color: var(--metric-muted) !important;
+		font-size: .7rem;
 	}
 
 	@media (min-width:768px) and (max-width:991.98px){
 		#bo-req-metrics .metric-card{padding:.75rem !important;}
 		#bo-req-metrics .fw-semibold{font-size:1.05rem;}
 		#bo-req-metrics .metric-trend{display:none;}
+	}
+
+	@media (max-width:575.98px){
+		#bo-req-metrics .metric-card--compact{padding:.65rem .7rem !important;}
+		#bo-req-metrics .metric-card--compact .metric-label{font-size:.56rem;}
+	}
+
+	@media (prefers-reduced-motion: reduce){
+		#bo-req-metrics .metric-card{transition:none;}
+		#bo-req-metrics .metric-card:hover{transform:none;}
 	}
 </style>
 
@@ -113,7 +269,7 @@
 	<div class="col-md-6">
 		<div class="input-group input-group-sm">
 			<span class="input-group-text bg-body-secondary border-0"><i class="fa fa-search text-muted"></i></span>
-			<input type="text" id="bo-req-search" class="form-control border-0" placeholder="Search requests (id, wallet, till, type, status, parties)...">
+			<input type="text" id="bo-req-search" class="form-control border-0" placeholder="Search requests (id, type, urgency, status, parties)...">
 		</div>
 	</div>
 	<div class="col-md-3 mt-2 mt-md-0">
@@ -148,43 +304,52 @@
 </div>
 <div id="bo-req-metrics" class="row g-2 mb-1 small align-items-stretch">
 	<div class="col-12 col-sm-6 col-lg-3">
-		<div class="p-2 rounded-3 metric-card h-100 d-flex flex-column justify-content-center">
+		<div class="p-2 rounded-3 metric-card metric-card--total h-100 d-flex flex-column justify-content-center">
 			<div class="d-flex justify-content-between align-items-center mb-1">
-				<div class="metric-label text-muted">Total amount</div>
-				<i class="fa fa-coins text-warning"></i>
+				<div class="metric-label">Total amount</div>
+				<span class="metric-icon" aria-hidden="true"><i class="fa fa-coins"></i></span>
 			</div>
 			<div class="d-flex justify-content-between align-items-end">
-				<div class="fw-semibold" id="bo-req-metric-amount">–</div>
+				<div class="metric-value" id="bo-req-metric-amount">–</div>
 				<div class="metric-trend text-muted" id="bo-req-metric-trend">vs yesterday: –</div>
 			</div>
 		</div>
 	</div>
 	<div class="col-12 col-sm-6 col-lg-3">
-		<div class="p-2 rounded-3 bg-body border h-100 d-flex flex-column justify-content-center metric-card">
+		<div class="p-2 rounded-3 bg-body border h-100 d-flex flex-column justify-content-center metric-card metric-card--count">
 			<div class="d-flex justify-content-between align-items-center mb-1">
-				<div class="metric-label text-muted">Total requests</div>
-				<i class="fa fa-list-check text-secondary"></i>
+				<div class="metric-label">Total requests</div>
+				<span class="metric-icon" aria-hidden="true"><i class="fa fa-list-check"></i></span>
 			</div>
-			<div class="fw-semibold" id="bo-req-metric-count">–</div>
+			<div class="metric-value" id="bo-req-metric-count">–</div>
 		</div>
 	</div>
 	<div class="col-4 col-sm-4 col-lg-2">
-		<div class="p-2 rounded-3 bg-body border h-100 d-flex flex-column justify-content-center metric-card">
-			<div class="metric-label text-muted">Pending</div>
-			<div class="fw-semibold text-secondary" id="bo-req-metric-pending">–</div>
+		<div class="p-2 rounded-3 bg-body border h-100 d-flex flex-column justify-content-center metric-card metric-card--pending metric-card--compact">
+			<div class="d-flex justify-content-between align-items-center mb-1">
+				<div class="metric-label">Pending</div>
+				<span class="metric-icon" aria-hidden="true"><i class="fa fa-clock"></i></span>
+			</div>
+			<div class="metric-value" id="bo-req-metric-pending">–</div>
 		</div>
 	</div>
 	<div class="col-4 col-sm-4 col-lg-2">
-		<div class="p-2 rounded-3 bg-body border h-100 d-flex flex-column justify-content-center metric-card">
-			<div class="metric-label text-muted">Approved</div>
-			<div class="fw-semibold text-success" id="bo-req-metric-approved">–</div>
+		<div class="p-2 rounded-3 bg-body border h-100 d-flex flex-column justify-content-center metric-card metric-card--approved metric-card--compact">
+			<div class="d-flex justify-content-between align-items-center mb-1">
+				<div class="metric-label">Approved</div>
+				<span class="metric-icon" aria-hidden="true"><i class="fa fa-check"></i></span>
+			</div>
+			<div class="metric-value" id="bo-req-metric-approved">–</div>
 		</div>
 	</div>
 	<div class="col-12 col-sm-4 col-lg-2">
-		<div class="p-2 rounded-3 bg-body border h-100 d-flex flex-column justify-content-center metric-card metric-accent">
-			<div class="metric-label">Rejected</div>
-			<div class="fw-semibold text-danger mb-1" id="bo-req-metric-rejected">–</div>
-			<div class="text-end" style="font-size:.7rem;"><span id="bo-req-scope-label" class="text-uppercase text-warning"></span></div>
+		<div class="p-2 rounded-3 bg-body border h-100 d-flex flex-column justify-content-center metric-card metric-card--rejected metric-card--compact">
+			<div class="d-flex justify-content-between align-items-center mb-1">
+				<div class="metric-label">Rejected</div>
+				<span class="metric-icon" aria-hidden="true"><i class="fa fa-times"></i></span>
+			</div>
+			<div class="metric-value mb-1" id="bo-req-metric-rejected">–</div>
+			<div class="text-end"><span id="bo-req-scope-label" class="metric-scope-label text-uppercase"></span></div>
 		</div>
 	</div>
 </div>
@@ -196,7 +361,6 @@
 				<th>#</th>
 				<th>Date created</th>
 				<th>Description</th>
-				<th>Status</th>
 				<th>Amount</th>
 				<th>Parties Involved</th>
 				<th>Action</th>
@@ -252,6 +416,7 @@
 									<?php endif; ?>
 								</span>
 							</div>
+							<div class="line"><span class="k">Urgency</span><span><?=backoffice_urgency_badge($row->urgency ?? 'Normal')?></span></div>
 							<div class="line"><span class="k">Desc</span><span><?=esc($row->description ?? '')?></span></div>
 							<div class="line"><span class="k">Amount</span><span class="fw-semibold"><?=number_format($row->amount ?? 0, 2)?></span></div>
 							<div class="line"><span class="k">From</span><span><?=$row->user_first_name . ' ' . $row->user_last_name ?></span></div>
@@ -290,10 +455,13 @@
 							</a>
 						</div>
 						<div class="text-muted fw-semibold bo-desc-text"><?=esc($row->description ?? '')?></div>
+						<div class="mt-1"><?=backoffice_urgency_badge($row->urgency ?? 'Normal')?></div>
 					</td>
 					<td class="d-none d-lg-table-cell">
-						<span class="<?= $badgeClass ?>"><?=esc($row->transaction_status)?></span>
-						<?php if (strtolower($row->transaction_status ?? '') === 'rejected' && $rejectReason !== ''): ?>
+						<div class="fw-semibold"><?=number_format($row->amount ?? 0, 2)?></div>
+						<div class="mt-1">
+							<span class="<?= $badgeClass ?>"><?=esc($row->transaction_status)?></span>
+							<?php if (strtolower($row->transaction_status ?? '') === 'rejected' && $rejectReason !== ''): ?>
 							<i class="fa fa-info-circle text-muted ms-1"
 							   tabindex="0"
 							   data-bs-toggle="popover"
@@ -302,9 +470,9 @@
 							   data-bs-html="true"
 							   data-bs-title="Reject reason"
 							   data-bs-content="<?=esc($rejectReason)?>"></i>
-						<?php endif; ?>
+							<?php endif; ?>
+						</div>
 					</td>
-					<td class="d-none d-lg-table-cell"><?=number_format($row->amount ?? 0, 2)?></td>
 					<td class="d-none d-lg-table-cell">
 						<div class="d-flex align-items-center gap-2 flex-nowrap mb-1">
 							<img src="<?=get_image($row->user_image)?>" style="width: 20px; height: 20px; object-fit: cover; border-radius: 50%;">
@@ -341,7 +509,7 @@
 				</tr>
 			<?php endforeach?>
 		<?php else:?>
-			<tr><td colspan="10" class="text-center justify-content-center">No records to show!</td></tr>
+			<tr><td colspan="9" class="text-center justify-content-center">No records to show!</td></tr>
 		<?php endif?>
 		</tbody>
 	</table>
@@ -1130,6 +1298,18 @@ document.addEventListener('DOMContentLoaded', function () {
 		return '<span class="' + cls + '">' + escapeHtml(status || '') + '</span>';
 	}
 
+	function renderUrgencyBadge(urgency) {
+		const value = String(urgency || 'Normal');
+		const key = ['immediate', 'high', 'normal', 'low'].includes(value.toLowerCase()) ? value.toLowerCase() : 'normal';
+		const descriptions = {
+			immediate: 'Respond now',
+			high: 'Prioritize soon',
+			normal: 'Standard response',
+			low: 'Can wait'
+		};
+		return '<span class="bo-urgency-badge bo-urgency-badge--' + key + '" title="' + descriptions[key] + '"><strong>' + escapeHtml(value) + '</strong><span class="bo-urgency-badge__action">' + descriptions[key] + '</span></span>';
+	}
+
 	function updateMetrics(totals, pagination) {
 		if (!totals) return;
 		if (metricAmount) {
@@ -1238,7 +1418,8 @@ document.addEventListener('DOMContentLoaded', function () {
 		const desc = escapeHtml(row.description || '');
 		const amount = formatAmount(row.amount);
 		const desktopDescription = '<div><a href="' + viewUrl + '">' + reqTypeLabel + '</a></div>'
-			+ '<div class="text-muted fw-semibold bo-desc-text">' + desc + '</div>';
+			+ '<div class="text-muted fw-semibold bo-desc-text">' + desc + '</div>'
+			+ '<div class="mt-1">' + renderUrgencyBadge(row.urgency) + '</div>';
 		const desktopParties = '<div class="d-flex align-items-center gap-2 flex-nowrap mb-1"><img src="' + escapeHtml(createdImg) + '" style="width: 20px; height: 20px; object-fit: cover; border-radius: 50%;"><code class="mb-0">From:</code> <span class="text-nowrap">' + escapeHtml(createdName) + '</span></div>'
 			+ '<div class="d-flex align-items-center gap-2 flex-nowrap"><code class="mb-0"><img src="' + escapeHtml(assignedImg) + '" style="width: 15px; height: 15px; object-fit: cover; border-radius: 50%;"> To:</code> <span class="text-nowrap">' + escapeHtml(assignedName) + '</span></div>';
 
@@ -1249,6 +1430,7 @@ document.addEventListener('DOMContentLoaded', function () {
 					+ '<div class="line"><a href="' + viewUrl + '">' + reqTypeLabel + '</a></div>'
 					+ '<div class="line"><span class="k">Date</span><span>' + transDateAndId + '</span></div>'
 					+ '<div class="line"><span class="k">Status</span><span>' + statusHtml + '</span></div>'
+					+ '<div class="line"><span class="k">Urgency</span><span>' + renderUrgencyBadge(row.urgency) + '</span></div>'
 					+ '<div class="line"><span class="k">Desc</span><span>' + desc + '</span></div>'
 					+ '<div class="line"><span class="k">Amount</span><span class="fw-semibold">' + amount + '</span></div>'
 					+ '<div class="line"><span class="k">From</span><span>' + escapeHtml(createdName) + '</span></div>'
@@ -1259,8 +1441,7 @@ document.addEventListener('DOMContentLoaded', function () {
 			+ '<td class="d-none d-lg-table-cell">' + idBadge + '</td>'
 			+ '<td class="d-none d-lg-table-cell">' + transDateAndId + '</td>'
 			+ '<td class="d-none d-lg-table-cell bo-desc-cell">' + desktopDescription + '</td>'
-			+ '<td class="d-none d-lg-table-cell">' + statusHtml + '</td>'
-			+ '<td class="d-none d-lg-table-cell">' + amount + '</td>'
+			+ '<td class="d-none d-lg-table-cell"><div class="fw-semibold">' + amount + '</div><div class="mt-1">' + statusHtml + '</div></td>'
 			+ '<td class="d-none d-lg-table-cell">' + desktopParties + '</td>'
 			+ '<td class="d-none d-lg-table-cell">' + actions + '</td>'
 			+ '</tr>';
@@ -1337,7 +1518,7 @@ document.addEventListener('DOMContentLoaded', function () {
 	function setLoading(state) {
 		isLoading = state;
 		if (state) {
-			tbody.innerHTML = '<tr><td colspan="10" class="text-center justify-content-center">Loading requests...</td></tr>';
+			tbody.innerHTML = '<tr><td colspan="9" class="text-center justify-content-center">Loading requests...</td></tr>';
 		}
 	}
 
@@ -1363,14 +1544,14 @@ document.addEventListener('DOMContentLoaded', function () {
 			.then(window.backofficeParseJson)
 			.then(data => {
 				if (!data || !data.success) {
-					tbody.innerHTML = '<tr><td colspan="10" class="text-center justify-content-center">' + escapeHtml(data.message || data.error || 'Failed to load requests.') + '</td></tr>';
+					tbody.innerHTML = '<tr><td colspan="9" class="text-center justify-content-center">' + escapeHtml(data.message || data.error || 'Failed to load requests.') + '</td></tr>';
 					pager.innerHTML = '';
 					return;
 				}
 				try {
 					const rows = Array.isArray(data.rows) ? data.rows : [];
 					if (!rows.length) {
-						tbody.innerHTML = '<tr><td colspan="10" class="text-center justify-content-center">No records to show!</td></tr>';
+						tbody.innerHTML = '<tr><td colspan="9" class="text-center justify-content-center">No records to show!</td></tr>';
 					} else {
 						let html = '';
 						rows.forEach((row, idx) => {
@@ -1386,7 +1567,7 @@ document.addEventListener('DOMContentLoaded', function () {
 				}
 			})
 			.catch(() => {
-				tbody.innerHTML = '<tr><td colspan="10" class="text-center justify-content-center">Failed to load requests.</td></tr>';
+				tbody.innerHTML = '<tr><td colspan="9" class="text-center justify-content-center">Failed to load requests.</td></tr>';
 				pager.innerHTML = '';
 			})
 			.finally(() => {

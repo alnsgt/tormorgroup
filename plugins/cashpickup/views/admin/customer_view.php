@@ -20,16 +20,18 @@
 	$isGeneralManager = false;
 	$canAssignPayout = false;
 	$canWithdraw = false;
+	$customerApprovers = [];
 	try {
 		$isOperationsManager = \CashpickupPermissions\is_operations_manager($db, $user_id);
 		$isGeneralManager = \CashpickupPermissions\is_general_manager($db, $user_id);
 		$canAssignPayout = user_can('is_admin') || $isOperationsManager || $isGeneralManager;
 		$canWithdraw = \CashpickupPermissions\can_withdraw_customer_payout($db, $user_id);
+		$customerApprovers = \CashpickupPermissions\eligible_approvers($db, $user_id);
 	} catch (\Throwable $e) {
 		error_log('[cashpickup] Customer payout access check failed: ' . $e->getMessage());
 	}
 	$canApproveDeny = user_can('is_admin') || $isOperationsManager || $isGeneralManager;
-	$canCreateCreditPayout = (user_can('is_admin') || user_can('is_manager'));
+	$canCreateCreditPayout = (user_can('is_admin') || user_can('is_manager') || $isOperationsManager);
 	$canEditCashpickup = (user_can('is_admin') || user_can('is_manager'));
 	$getAllocationRemaining = function (int $receiveId) use ($db, $user_id): float {
 		if ($receiveId <= 0 || $user_id <= 0) {
@@ -300,7 +302,7 @@
 	} catch (\Throwable $e) { $hasTransferLedger = false; }
 	$trSelect = $hasTransferLedger ? "COALESCE(tr.transferred,0)" : "0";
 	$trJoin = $hasTransferLedger ? "\n\t\tLEFT JOIN (\n\t\t\tSELECT CASE WHEN COALESCE(r.tracking_id,'') <> '' THEN r.tracking_id ELSE CONCAT('cashpickup-', t.receive_id) END AS tracking_group,\n\t\t\t\tCOALESCE(SUM(t.amount),0) AS transferred\n\t\t\tFROM cashpickup_transfers t\n\t\t\tLEFT JOIN cashpickups r ON r.id = t.receive_id\n\t\t\tGROUP BY tracking_group\n\t\t) AS tr ON tr.tracking_group = grp.tracking_group" : "";
-	$txRowParams = $txParams;
+	$txRowParams = array_merge($txParams, $balanceParams);
 	$payoutParams = $baseParams;
 	$viewerSortJoin = '';
 	$viewerSortOrder = 'm.id DESC';
@@ -329,17 +331,12 @@
 		        0 AS pending_reserved,
 		        0 AS pending_parts,
 		        0 AS transferred_to_agents,
-		        0 AS ledger_balance,
+		        {$balanceSubquery} AS ledger_balance,
 		        {$viewerRemainingSelect} AS viewer_remaining
 		 FROM (
 			SELECT MAX(m.id) AS row_id,
 			       {$trackingGroupExprM} AS tracking_group,
-			       COALESCE(SUM(
-			       	CASE
-						WHEN " . \CashpickupLedger\normalized_cashpickup_credit_mode_sql('m') . " = 'credit' THEN 0
-			       		ELSE COALESCE(m.amount_involved,0)
-			       	END
-			       ),0) AS group_received,
+			       COALESCE(SUM(" . \CashpickupLedger\statement_received_amount_sql('m') . "),0) AS group_received,
 			       COUNT(*) AS receive_parts
 			FROM (SELECT DISTINCT m.* FROM cashpickups AS m) AS m
 			{$where}
@@ -556,7 +553,7 @@
 							<th class="text-end">Paid</th>
 							<th>Payout</th>
 							<th>Approval</th>
-							<th class="text-end">Remaining</th>
+							<th class="text-end">Accumulated balance</th>
 							<th class="text-end">Actions</th>
 						</tr>
 					</thead>
@@ -577,7 +574,7 @@
 									$rawRemaining = $isCreditPayout ? (0 - $paidRequested) : ($displayReceived - $paidRequested);
 				$overage = !$isCreditPayout ? max(0, (float)(-$rawRemaining)) : 0.0;
 				$parts = (int)($tx->payout_parts ?? 0);
-				$ledgerBalance = round((float)$rawRemaining, 2);
+				$ledgerBalance = round((float)($tx->ledger_balance ?? $rawRemaining), 2);
 				$fullyPaid = $comparisonAmount <= 0.00001
 					? ($paidRequested > 0.00001)
 					: ($paidRequested >= ($comparisonAmount - 0.00001));
@@ -588,6 +585,7 @@
 				$displayApprovalStatus = ($isCreditPayout && !in_array($approvalStatusRaw, ['denied','reversed'], true) && !$fullyPaid) ? 'pending' : $approvalStatusRaw;
 				$displayApprovalText = ($isCreditPayout && !in_array($approvalStatusRaw, ['denied','reversed'], true) && !$fullyPaid) ? 'Pending payout' : ucfirst($displayApprovalStatus);
 				$assignedTo = (int)($tx->assigned_user_id ?? 0);
+				$approvalAssigneeId = (int)($tx->approval_assigned_to ?? 0);
 				$canAssignThis = $isManagerOrAdmin
 					&& ($approvalStatusRaw === 'approved' || ($isCreditPayout && !in_array($approvalStatusRaw, ['denied','reversed'], true) && !$fullyPaid));
 				$allocationRemaining = isset($tx->viewer_remaining)
@@ -598,7 +596,11 @@
 						($approvalStatusRaw === 'approved' && $allocationRemaining > 0.00001)
 						|| ($isCreditPayout && $assignedTo === (int)$user_id && $displayApprovalStatus === 'pending')
 					);
-				$canApproveThis = $canApproveDeny && $approvalStatusRaw === 'pending' && !$isCreditPayout;
+				$canApproveThis = $canApproveDeny
+					&& $approvalStatusRaw === 'pending'
+					&& !$isCreditPayout
+					&& $approvalAssigneeId > 0
+					&& $approvalAssigneeId === $user_id;
 			?>
 								<tr>
 									<td>
@@ -756,9 +758,13 @@
 							$statusTone = strpos($statusValue, 'approved') !== false ? 'success'
 								: (strpos($statusValue, 'pending') === 0 ? 'warning'
 									: (preg_match('/denied|reversed|rejected/i', $statusValue) ? 'danger' : 'secondary'));
+							$approvalAssigneeName = trim((string)($tx->approval_assignee_name ?? ''));
+							$approvalAssigneeId = (int)($tx->approval_assigned_to ?? 0);
 							$canApproveActivity = $canApproveDeny
 								&& $recordId > 0
 								&& $type !== 'credit_issued'
+								&& $approvalAssigneeId > 0
+								&& $approvalAssigneeId === $user_id
 								&& ($approvalStatus === 'pending'
 									|| ($approvalStatus === '' && strpos($transactionStatus, 'pending') === 0));
 						?>
@@ -776,6 +782,9 @@
 									<?php if(trim((string)($tx->payment_method ?? '')) !== ''): ?> · <?=esc((string)$tx->payment_method)?><?php endif; ?>
 									<?php if(trim((string)($tx->tracking_id ?? '')) !== ''): ?> · Ref <?=esc((string)$tx->tracking_id)?><?php endif; ?>
 								</div>
+								<?php if($approvalAssigneeName !== ''): ?>
+									<div class="small text-body-secondary mt-1">Approver: <?=esc($approvalAssigneeName)?></div>
+								<?php endif; ?>
 								<div class="row g-2 mt-1 small">
 									<?php if($received > 0): ?><div class="col-6"><span class="text-body-secondary">Cash in</span><div class="fw-semibold text-success">GH&#8373; <?=number_format($received, 2)?></div></div><?php endif; ?>
 									<?php if($paid > 0): ?><div class="col-6"><span class="text-body-secondary">Cash out</span><div class="fw-semibold text-danger">GH&#8373; <?=number_format($paid, 2)?></div></div><?php endif; ?>
@@ -833,9 +842,13 @@
 									$statusTone = strpos($statusValue, 'approved') !== false ? 'success'
 										: (strpos($statusValue, 'pending') === 0 ? 'warning'
 											: (preg_match('/denied|reversed|rejected/i', $statusValue) ? 'danger' : 'secondary'));
+									$approvalAssigneeName = trim((string)($tx->approval_assignee_name ?? ''));
+									$approvalAssigneeId = (int)($tx->approval_assigned_to ?? 0);
 									$canApproveActivity = $canApproveDeny
 										&& $recordId > 0
 										&& $type !== 'credit_issued'
+										&& $approvalAssigneeId > 0
+										&& $approvalAssigneeId === $user_id
 										&& ($approvalStatus === 'pending'
 											|| ($approvalStatus === '' && strpos($transactionStatus, 'pending') === 0));
 								?>
@@ -848,6 +861,9 @@
 									<td>
 										<div class="d-flex align-items-center gap-2"><span class="badge text-bg-<?=$typeClass?>"><?=esc($typeLabel)?></span><span class="fw-semibold"><?=esc((string)($tx->sender_details ?? 'Account activity'))?></span></div>
 										<div class="small text-body-secondary"><?=esc(implode(' · ', array_filter([(string)($tx->source ?? ''), (string)($tx->payment_method ?? ''), trim((string)($tx->tracking_id ?? '')) !== '' ? 'Ref ' . (string)$tx->tracking_id : ''])))?></div>
+										<?php if($approvalAssigneeName !== ''): ?>
+											<div class="small text-body-secondary">Approver: <?=esc($approvalAssigneeName)?></div>
+										<?php endif; ?>
 									</td>
 									<td class="text-end">
 										<div class="d-inline-flex flex-column align-items-end gap-1">
@@ -1040,6 +1056,44 @@
 	}
 	.cashpickup-metrics-details>summary{list-style:none;cursor:pointer}
 	.cashpickup-metrics-details>summary::-webkit-details-marker{display:none}
+	.cashpickup-customer-page-header{gap:1rem;align-items:flex-start!important}
+	.cashpickup-customer-page-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.5rem}
+	@media(max-width:991.98px){
+		.cashpickup-customer-page-header{flex-direction:column}
+		.cashpickup-customer-page-actions{
+			display:grid;
+			grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));
+			gap:.55rem;
+			width:100%;
+		}
+		.cashpickup-customer-page-actions .btn{
+			display:inline-flex;
+			align-items:center;
+			justify-content:center;
+			gap:.4rem;
+			width:100%;
+			min-height:2.75rem;
+			padding:.5rem .65rem;
+			white-space:normal;
+			text-align:center;
+			line-height:1.2;
+			border-radius:.75rem;
+			box-shadow:0 .15rem .4rem rgba(15,23,42,.06);
+			transition:transform .15s ease,box-shadow .15s ease;
+		}
+		.cashpickup-customer-page-actions .btn:active{transform:scale(.98)}
+	}
+	@media(hover:hover) and (pointer:fine) and (max-width:991.98px){
+		.cashpickup-customer-page-actions .btn:hover{
+			transform:translateY(-1px);
+			box-shadow:0 .35rem .8rem rgba(15,23,42,.12);
+		}
+	}
+	@media(prefers-reduced-motion:reduce){
+		.cashpickup-customer-page-actions .btn{transition:none}
+		.cashpickup-customer-page-actions .btn:active,
+		.cashpickup-customer-page-actions .btn:hover{transform:none}
+	}
 	.cashpickup-metrics-chevron{transition:transform .15s ease}
 	.cashpickup-metrics-details[open] .cashpickup-metrics-chevron{transform:rotate(180deg)}
 	@media (prefers-reduced-motion:reduce){.cashpickup-metrics-chevron{transition:none}}
@@ -1064,12 +1118,12 @@
 	@media(max-width:575.98px){.customer-profile-card .card-body{padding:1rem}.customer-profile-avatar{width:3rem;height:3rem;border-radius:.85rem}}
 </style>
 
-<div class="d-flex align-items-center justify-content-between mb-3">
+<div class="d-flex align-items-center justify-content-between mb-3 cashpickup-customer-page-header">
 	<div>
 		<h4 class="mb-0">Customer Ledger</h4>
 		<small class="text-muted">Profile and transactions</small>
 	</div>
-	<div class="d-flex flex-wrap gap-2">
+	<div class="cashpickup-customer-page-actions">
 		<a class="btn btn-outline-secondary" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/customers">Back to Customers</a>
 		<?php if($canAssignPayout && $customerApproved): ?>
 			<a class="btn btn-primary" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/customer/<?=esc((string)$customerId)?>#withdraw-section"><i class="fa fa-user-plus me-1"></i> Assign payout</a>
@@ -1091,8 +1145,8 @@
 		<?php if($payoutCandidate > 0): ?>
 			<a class="btn btn-outline-warning" href="<?=$payoutCandidateIsCredit ? ROOT.'/'.$admin_route.'/'.$plugin_route.'/payout/'.esc((string)$payoutCandidate) : ROOT.'/'.$admin_route.'/'.$plugin_route.'/customer/'.esc((string)$customerId).'#withdraw-section'?>">New Payout</a>
 		<?php endif; ?>
-		<a class="btn btn-outline-success" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query($statementExportParamsXlsx)?>">Excel</a>
-		<a class="btn btn-outline-danger" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query($statementExportParamsPdf)?>">PDF</a>
+		<a class="btn btn-outline-success" title="Export Excel" aria-label="Export Excel" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query($statementExportParamsXlsx)?>"><i class="fa-solid fa-file-excel" aria-hidden="true"></i></a>
+		<a class="btn btn-outline-danger" title="Export PDF" aria-label="Export PDF" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/export?<?=http_build_query($statementExportParamsPdf)?>"><i class="fa-solid fa-file-pdf" aria-hidden="true"></i></a>
 	</div>
 </div>
 
@@ -1205,7 +1259,11 @@
 				<div class="small text-body-secondary fw-semibold text-uppercase">Customer profile</div>
 				<div class="d-flex flex-wrap align-items-center gap-2">
 					<h5 class="customer-profile-title mb-0" id="customerProfileHeading"><?=esc($profileName !== '' ? $profileName : 'Unnamed customer')?></h5>
-					<span class="badge rounded-pill <?=$profileStatusClass?>"><?=esc(ucfirst($profileApprovalStatus))?></span>
+					<?php if($profileApprovalStatus === 'approved'): ?>
+						<span class="text-success fs-5" title="Verified" aria-label="Verified"><i class="fa-solid fa-circle-check" aria-hidden="true"></i><span class="visually-hidden">Verified</span></span>
+					<?php else: ?>
+						<span class="badge rounded-pill <?=$profileStatusClass?>"><?=esc(ucfirst($profileApprovalStatus))?></span>
+					<?php endif; ?>
 				</div>
 				<div class="text-body-secondary mt-1">
 					<i class="fa-solid fa-phone me-1" aria-hidden="true"></i>
@@ -1474,6 +1532,7 @@
 										$statementTracking = trim((string)($statementRow->tracking_id ?? ''));
 										$statementTransferFrom = trim((string)($statementRow->transfer_from_customer_name ?? ''));
 										$statementTransferTo = trim((string)($statementRow->transfer_to_customer_name ?? ''));
+										$statementApproverName = trim((string)($statementRow->approval_assignee_name ?? ''));
 										$statementBalance = (float)($statementRow->balance_amount ?? 0);
 										$statementType = ucwords(str_replace('_', ' ', (string)($statementRow->entry_type ?? '')));
 										$statementReceived = (float)($statementRow->received_amount ?? 0);
@@ -1503,6 +1562,9 @@
 											<?php endif; ?>
 											<?php if ($statementMethod !== ''): ?>
 												<div class="small text-muted">Method: <?=esc($statementMethod)?></div>
+											<?php endif; ?>
+											<?php if ($statementApproverName !== ''): ?>
+												<div class="small text-body-secondary">Approver: <?=esc($statementApproverName)?></div>
 											<?php endif; ?>
 										</td>
 										<td class="text-end text-success text-nowrap d-md-none"><?=number_format($statementReceived, 2)?></td>
@@ -1723,6 +1785,16 @@
 							<div class="col-12 col-md-4">
 								<label class="form-label">Customer Confirmation Name/ID <span class="text-danger">*</span></label>
 								<input type="text" name="confirmed_by" class="form-control" value="<?=esc((string)($customer->full_name ?? ''))?>" required>
+							</div>
+							<div class="col-12 col-md-6">
+								<label class="form-label">Assign approver <span class="text-danger">*</span></label>
+								<select name="approval_assigned_to" class="form-select" required>
+									<option value="">---Select a superior approver---</option>
+									<?php foreach ($customerApprovers as $approver): ?>
+										<?php $approverName = trim($approver->first_name . ' ' . $approver->last_name); ?>
+										<option value="<?=esc((string)$approver->id)?>"><?=esc(($approverName !== '' ? $approverName : ('User #' . $approver->id)) . ' - ' . $approver->role_label)?></option>
+									<?php endforeach; ?>
+								</select>
 							</div>
 							<div class="col-12">
 								<label class="form-label">Notes</label>
@@ -1994,6 +2066,16 @@
 							<div class="col-12">
 								<label class="form-label">Notes</label>
 								<textarea name="notes" class="form-control" rows="2"></textarea>
+							</div>
+							<div class="col-12 col-md-6">
+								<label class="form-label">Assign approver <span class="text-danger">*</span></label>
+								<select name="approval_assigned_to" class="form-select" required>
+									<option value="">---Select a superior approver---</option>
+									<?php foreach ($customerApprovers as $approver): ?>
+										<?php $approverName = trim($approver->first_name . ' ' . $approver->last_name); ?>
+										<option value="<?=esc((string)$approver->id)?>"><?=esc(($approverName !== '' ? $approverName : ('User #' . $approver->id)) . ' - ' . $approver->role_label)?></option>
+									<?php endforeach; ?>
+								</select>
 							</div>
 						</div>
 						<div class="mt-3">
