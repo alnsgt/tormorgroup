@@ -3576,6 +3576,122 @@
           </div>
         </div>
 
+        <style>
+           #basicAdminChannelStatementModal .basic-admin-statement-dialog {
+             width: min(96vw, 1440px);
+             max-width: none;
+             height: calc(100vh - 2rem);
+             height: calc(100dvh - 2rem);
+             margin: 1rem auto;
+           }
+           #basicAdminChannelStatementModal .modal-content { height: 100%; min-height: 0; overflow: hidden; }
+           #basicAdminChannelStatementModal .modal-body { min-height: 0; overflow: auto; padding: clamp(.5rem, 1.5vw, 1.25rem); }
+           @media (max-width: 991.98px) {
+             #basicAdminChannelStatementModal .basic-admin-statement-dialog {
+               width: calc(100vw - 1rem);
+               height: calc(100vh - 1rem);
+               height: calc(100dvh - 1rem);
+               margin: .5rem auto;
+             }
+           }
+           @media (max-width: 575.98px) {
+             #basicAdminChannelStatementModal .basic-admin-statement-dialog { width: 100vw; height: 100vh; height: 100dvh; margin: 0; }
+             #basicAdminChannelStatementModal .modal-content { border: 0; border-radius: 0; }
+             #basicAdminChannelStatementModal .modal-header { padding: .7rem .85rem; }
+             #basicAdminChannelStatementModal .modal-body { padding: .5rem; }
+           }
+        </style>
+        <div class="modal fade" id="basicAdminChannelStatementModal" tabindex="-1" aria-labelledby="basicAdminChannelStatementModalTitle" aria-hidden="true">
+           <div class="modal-dialog modal-dialog-scrollable basic-admin-statement-dialog">
+             <div class="modal-content">
+               <div class="modal-header">
+               <h2 class="modal-title fs-5" id="basicAdminChannelStatementModalTitle">Channel statement</h2>
+               <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+               </div>
+               <div class="modal-body" id="basicAdminChannelStatementContent" aria-live="polite">
+               <div class="text-center text-muted py-4">Select a channel to load its statement.</div>
+               </div>
+             </div>
+           </div>
+        </div>
+        <div id="basicAdminStatementCsrf" class="d-none"><?=csrf()?></div>
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+           const modalElement = document.getElementById('basicAdminChannelStatementModal');
+           const content = document.getElementById('basicAdminChannelStatementContent');
+           if (!modalElement || !content || !window.bootstrap?.Modal) return;
+
+           const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
+           const loadStatement = async function(options) {
+             const csrfToken = document.querySelector('#basicAdminStatementCsrf input[name="csrf"]')?.value || '';
+             content.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Loading statement…</div>';
+             try {
+               const response = await fetch('<?=ROOT?>/admin', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/json'},
+               body: JSON.stringify({
+                 action: 'view-channel-statement',
+                 csrf: csrfToken,
+                 drawerId: options.drawerId,
+                 channelType: options.channelType,
+                 channelKey: options.channelKey,
+                 startDate: options.startDate || '',
+                 endDate: options.endDate || ''
+               })
+               });
+               content.innerHTML = await response.text();
+               if (!response.ok) content.setAttribute('data-load-error', '1');
+               else content.removeAttribute('data-load-error');
+             } catch (error) {
+               console.error('Unable to load channel statement', error);
+               content.innerHTML = '<div class="alert alert-danger">Unable to load this channel statement. Please try again.</div>';
+             }
+           };
+
+           document.addEventListener('click', function(event) {
+             const button = event.target.closest('.basic-admin-view-channel-statement');
+             if (!button) return;
+             modalElement.dataset.drawerId = button.dataset.drawerId || '';
+             modalElement.dataset.channelType = button.dataset.channelType || '';
+             modalElement.dataset.channelKey = button.dataset.channelKey || '';
+             modal.show();
+             loadStatement({
+               drawerId: modalElement.dataset.drawerId,
+               channelType: modalElement.dataset.channelType,
+               channelKey: modalElement.dataset.channelKey
+             });
+           });
+
+           content.addEventListener('submit', function(event) {
+             const form = event.target.closest('.channel-statement-filter');
+             if (!form) return;
+             event.preventDefault();
+             const values = new FormData(form);
+             loadStatement({
+               drawerId: modalElement.dataset.drawerId,
+               channelType: modalElement.dataset.channelType,
+               channelKey: modalElement.dataset.channelKey,
+               startDate: values.get('start_date') || '',
+               endDate: values.get('end_date') || ''
+             });
+           });
+
+           content.addEventListener('click', function(event) {
+             const clearButton = event.target.closest('[data-statement-clear]');
+             if (!clearButton) return;
+             const form = clearButton.closest('.channel-statement-filter');
+             if (!form) return;
+             form.elements.start_date.value = '';
+             form.elements.end_date.value = '';
+             loadStatement({
+               drawerId: modalElement.dataset.drawerId,
+               channelType: modalElement.dataset.channelType,
+               channelKey: modalElement.dataset.channelKey
+             });
+           });
+        });
+        </script>
+
         <script>
           (function(){
             function clearStaleDenoDraft(){

@@ -88,6 +88,39 @@ try {
 
     $info = ['success' => false, 'results' => []];
 
+    if ($action === 'view-channel-statement') {
+        if (!csrf_verify(['csrf' => (string)($rawData['csrf'] ?? '')])) {
+            http_response_code(403);
+            echo 'Your session expired. Refresh the page and try again.';
+            return;
+        }
+
+        require_once dirname(__DIR__, 2) . '/operations_account/helpers/channel-statement.php';
+        try {
+            $channelStatement = operations_account_get_channel_statement(
+                (int)($rawData['drawerId'] ?? 0),
+                (string)($rawData['channelType'] ?? ''),
+                (string)($rawData['channelKey'] ?? '')
+            );
+            $statementFilters = [
+                'start_date' => $rawData['startDate'] ?? '',
+                'end_date' => $rawData['endDate'] ?? '',
+            ];
+            $admin_route = 'admin';
+            $plugin_route = 'operations_accounts';
+            require dirname(__DIR__, 2) . '/operations_account/views/admin/cashdrawers/channel_statement.php';
+        } catch (\InvalidArgumentException $e) {
+            http_response_code(400);
+            echo 'Invalid channel statement request.';
+        } catch (\Throwable $e) {
+            error_log('[CashdrawerChannelStatement] ' . $e->getMessage());
+            if (http_response_code() !== 403) {
+                http_response_code(500);
+            }
+            echo 'Unable to load this channel statement.';
+        }
+        return;
+    }
 
 
     if ($action === 'exchange-ecash') {
@@ -2276,9 +2309,10 @@ try {
                     $badgeClass = $isCfaCash ? 'cashdrawer-channel-badge--cfa' : 'cashdrawer-channel-badge--ghs';
                     $label = esc($currencyLabel);
                     $statementKey = (string)($ch->channel_key ?? '');
+                    $statementKeyAttribute = htmlspecialchars($statementKey, ENT_QUOTES, 'UTF-8');
                     $statementQuery = 'channel_type=cash&amp;channel_key=' . rawurlencode($statementKey);
                     $statementBase = ROOT . '/admin/operations_accounts/';
-                    $statementActions = "<div class='cashdrawer-statement-actions'><a class='btn btn-sm btn-outline-primary' href='{$statementBase}view_channel_statement/{$drawerId}?{$statementQuery}'><i class='fa fa-eye' aria-hidden='true'></i> View</a><a class='btn btn-sm btn-outline-danger' href='{$statementBase}export_channel_statement_pdf/{$drawerId}?{$statementQuery}' target='_blank' rel='noopener'><i class='fa fa-file-pdf' aria-hidden='true'></i> PDF</a></div>";
+                    $statementActions = "<div class='cashdrawer-statement-actions'><button class='btn btn-sm btn-outline-primary basic-admin-view-channel-statement' type='button' data-drawer-id='{$drawerId}' data-channel-type='cash' data-channel-key='{$statementKeyAttribute}'><i class='fa fa-eye' aria-hidden='true'></i> View</button><a class='btn btn-sm btn-outline-danger' href='{$statementBase}export_channel_statement_pdf/{$drawerId}?{$statementQuery}' target='_blank' rel='noopener'><i class='fa fa-file-pdf' aria-hidden='true'></i> PDF</a></div>";
 
                     $html .= "<tr class='cashdrawer-channel-row {$rowClass}' style='border-bottom: 1px solid var(--bs-border-color);'>
 
@@ -2362,9 +2396,11 @@ try {
                     $badgeAccessibility = $isSharedAccount
                         ? " title='Shared account' aria-label='Shared account'"
                         : " title='E-cash' aria-label='E-cash'";
-                    $statementQuery = 'channel_type=ecash&amp;channel_key=' . rawurlencode((string)($ch->channel_key ?? ''));
+                    $statementKey = (string)($ch->channel_key ?? '');
+                    $statementKeyAttribute = htmlspecialchars($statementKey, ENT_QUOTES, 'UTF-8');
+                    $statementQuery = 'channel_type=ecash&amp;channel_key=' . rawurlencode($statementKey);
                     $statementBase = ROOT . '/admin/operations_accounts/';
-                    $statementActions = "<div class='cashdrawer-statement-actions'><a class='btn btn-sm btn-outline-primary' href='{$statementBase}view_channel_statement/{$drawerId}?{$statementQuery}'><i class='fa fa-eye' aria-hidden='true'></i> View</a><a class='btn btn-sm btn-outline-danger' href='{$statementBase}export_channel_statement_pdf/{$drawerId}?{$statementQuery}' target='_blank' rel='noopener'><i class='fa fa-file-pdf' aria-hidden='true'></i> PDF</a></div>";
+                    $statementActions = "<div class='cashdrawer-statement-actions'><button class='btn btn-sm btn-outline-primary basic-admin-view-channel-statement' type='button' data-drawer-id='{$drawerId}' data-channel-type='ecash' data-channel-key='{$statementKeyAttribute}'><i class='fa fa-eye' aria-hidden='true'></i> View</button><a class='btn btn-sm btn-outline-danger' href='{$statementBase}export_channel_statement_pdf/{$drawerId}?{$statementQuery}' target='_blank' rel='noopener'><i class='fa fa-file-pdf' aria-hidden='true'></i> PDF</a></div>";
 
                     $html .= "<tr class='cashdrawer-channel-row {$rowClass}' style='border-bottom: 1px solid var(--bs-border-color);'>
 

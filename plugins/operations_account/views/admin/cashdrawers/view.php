@@ -1035,7 +1035,8 @@ window.toggleDenoHistoryModal = function() {
                     $statementParams = http_build_query(['channel_type' => 'cash', 'channel_key' => $statementKey]);
                     $statementBase = ROOT . '/' . $admin_route . '/' . $plugin_route;
                 ?>
-                <a class="btn btn-sm btn-outline-primary" href="<?=esc($statementBase . '/view_channel_statement/' . (int)($row->id ?? 0) . '?' . $statementParams)?>">View statement</a>
+                <button class="btn btn-sm btn-outline-primary view-channel-statement" type="button"
+                    data-drawer-id="<?= (int)($row->id ?? 0) ?>" data-channel-type="cash" data-channel-key="<?=esc($statementKey)?>">View statement</button>
                 <a class="btn btn-sm btn-outline-danger" target="_blank" href="<?=esc($statementBase . '/export_channel_statement_pdf/' . (int)($row->id ?? 0) . '?' . $statementParams)?>"><i class="fa fa-file-pdf" aria-hidden="true"></i> Export PDF</a>
             </div>
         </div>
@@ -1114,7 +1115,8 @@ window.toggleDenoHistoryModal = function() {
                     $statementParams = http_build_query(['channel_type' => 'ecash', 'channel_key' => $statementKey]);
                     $statementBase = ROOT . '/' . $admin_route . '/' . $plugin_route;
                 ?>
-                <a class="btn btn-sm btn-outline-primary" href="<?=esc($statementBase . '/view_channel_statement/' . (int)($row->id ?? 0) . '?' . $statementParams)?>">View statement</a>
+                <button class="btn btn-sm btn-outline-primary view-channel-statement" type="button"
+                    data-drawer-id="<?= (int)($row->id ?? 0) ?>" data-channel-type="ecash" data-channel-key="<?=esc($statementKey)?>">View statement</button>
                 <a class="btn btn-sm btn-outline-danger" target="_blank" href="<?=esc($statementBase . '/export_channel_statement_pdf/' . (int)($row->id ?? 0) . '?' . $statementParams)?>"><i class="fa fa-file-pdf" aria-hidden="true"></i> Export PDF</a>
             </div>
         </div>
@@ -1137,14 +1139,140 @@ window.toggleDenoHistoryModal = function() {
     </div>
 </div>
 
-<!-- Back Button -->
-<div class="mt-4 mb-4">
-    <a href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>">
-        <button class="btn btn-outline-primary">
-            <i class="fa fa-chevron-left"></i> Back to Cashdrawers
-        </button>
-    </a>
+<style>
+    #channelStatementModal .channel-statement-modal-dialog {
+        width: min(96vw, 1440px);
+        max-width: none;
+        height: calc(100vh - 2rem);
+        height: calc(100dvh - 2rem);
+        margin: 1rem auto;
+    }
+    #channelStatementModal .modal-content {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+    }
+    #channelStatementModal .modal-body {
+        min-height: 0;
+        overflow: auto;
+        padding: clamp(.5rem, 1.5vw, 1.25rem);
+    }
+    @media (max-width: 991.98px) {
+        #channelStatementModal .channel-statement-modal-dialog {
+            width: calc(100vw - 1rem);
+            height: calc(100vh - 1rem);
+            height: calc(100dvh - 1rem);
+            margin: .5rem auto;
+        }
+    }
+    @media (max-width: 575.98px) {
+        #channelStatementModal .channel-statement-modal-dialog {
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
+            margin: 0;
+        }
+        #channelStatementModal .modal-content { border: 0; border-radius: 0; }
+        #channelStatementModal .modal-header { padding: .7rem .85rem; }
+        #channelStatementModal .modal-body { padding: .5rem; }
+    }
+</style>
+
+<div class="modal fade" id="channelStatementModal" tabindex="-1" aria-labelledby="channelStatementModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable channel-statement-modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title fs-5" id="channelStatementModalTitle">Channel statement</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="channelStatementContent">
+                <div class="text-center text-muted py-4">Select a channel to load its statement.</div>
+            </div>
+        </div>
+    </div>
 </div>
+<div id="channelStatementCsrf" class="d-none"><?=csrf()?></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const statementModalElement = document.getElementById('channelStatementModal');
+    const statementContent = document.getElementById('channelStatementContent');
+    if (!statementModalElement || !statementContent || !window.bootstrap?.Modal) return;
+
+    const statementModal = bootstrap.Modal.getOrCreateInstance(statementModalElement);
+    const requestStatement = async function(options) {
+        const csrfToken = document.querySelector('#channelStatementCsrf input[name="csrf"]')?.value || '';
+        statementContent.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2" role="status"></span>Loading statement…</div>';
+        try {
+            const response = await fetch('<?=esc(ROOT . '/' . $admin_route)?>', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    action: 'view-channel-statement',
+                    csrf: csrfToken,
+                    drawerId: options.drawerId,
+                    channelType: options.channelType,
+                    channelKey: options.channelKey,
+                    startDate: options.startDate || '',
+                    endDate: options.endDate || ''
+                })
+            });
+            const html = await response.text();
+            statementContent.innerHTML = html;
+            if (!response.ok) {
+                statementContent.setAttribute('data-load-error', '1');
+            } else {
+                statementContent.removeAttribute('data-load-error');
+            }
+        } catch (error) {
+            console.error('Unable to load channel statement', error);
+            statementContent.innerHTML = '<div class="alert alert-danger">Unable to load this channel statement. Please try again.</div>';
+        }
+    };
+
+    document.addEventListener('click', function(event) {
+        const button = event.target.closest('.view-channel-statement');
+        if (!button) return;
+        statementModalElement.dataset.drawerId = button.dataset.drawerId || '';
+        statementModalElement.dataset.channelType = button.dataset.channelType || '';
+        statementModalElement.dataset.channelKey = button.dataset.channelKey || '';
+        statementModal.show();
+        requestStatement({
+            drawerId: statementModalElement.dataset.drawerId,
+            channelType: statementModalElement.dataset.channelType,
+            channelKey: statementModalElement.dataset.channelKey
+        });
+    });
+
+    statementContent.addEventListener('submit', function(event) {
+        const form = event.target.closest('.channel-statement-filter');
+        if (!form) return;
+        event.preventDefault();
+        const formData = new FormData(form);
+        requestStatement({
+            drawerId: statementModalElement.dataset.drawerId,
+            channelType: statementModalElement.dataset.channelType,
+            channelKey: statementModalElement.dataset.channelKey,
+            startDate: formData.get('start_date') || '',
+            endDate: formData.get('end_date') || ''
+        });
+    });
+
+    statementContent.addEventListener('click', function(event) {
+        const clearButton = event.target.closest('[data-statement-clear]');
+        if (!clearButton) return;
+        const form = clearButton.closest('.channel-statement-filter');
+        if (!form) return;
+        form.elements.start_date.value = '';
+        form.elements.end_date.value = '';
+        requestStatement({
+            drawerId: statementModalElement.dataset.drawerId,
+            channelType: statementModalElement.dataset.channelType,
+            channelKey: statementModalElement.dataset.channelKey
+        });
+    });
+});
+</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {

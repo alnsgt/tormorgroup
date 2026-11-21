@@ -18,7 +18,17 @@ if ($cfaHelperPath && file_exists($cfaHelperPath)) {
 	require_once $cfaHelperPath;
 }
 
-$postdata = $req->post();
+$approvedEdit = $GLOBALS['operations_account_approved_cashdrawer_edit'] ?? null;
+if (
+	!is_array($approvedEdit)
+	|| !user_can('is_admin')
+	|| (int)($approvedEdit['drawer_id'] ?? 0) !== (int)($row->id ?? 0)
+) {
+	$approvedEdit = null;
+}
+$postdata = $approvedEdit !== null && is_array($approvedEdit['post'] ?? null)
+	? $approvedEdit['post']
+	: $req->post();
 $currencyDetails = $postdata['denos'] ?? null;
 
 // Collect dynamic e-cash channels coming from the form.
@@ -54,18 +64,23 @@ foreach ($postdata as $field => $value) {
 	$ecashChannels[$channelKey] = $amount;
 	$ecashProofUploads[$channelKey] = 'ecash_proof_' . strtolower(substr($field, 6));
 }
+if ($approvedEdit !== null && is_array($approvedEdit['proofs'] ?? null)) {
+	$ecashProofUploads = $approvedEdit['proofs'];
+}
 
 $currencyArray = is_string($currencyDetails) ? json_decode($currencyDetails, true) : null;
 
 $postdata['id'] = $row->id;
-$csrf = csrf_verify($postdata);
+$csrf = $approvedEdit !== null
+	? ((int)($approvedEdit['request_id'] ?? 0) > 0)
+	: csrf_verify($postdata);
 if (!$csrf) {
 	$cashdrawer->errors['user_id'] = "Form expired!";
 	set_value('errors', array_merge($cashdrawer->errors, $req->upload_errors));
 	return;
 }
 
-if (!user_can('edit_wallet'))
+if (!user_can('edit_wallet') && !($approvedEdit !== null && user_can('is_admin')))
 {
 	message_fail('Access denied');
 	return;
@@ -158,6 +173,19 @@ if (!empty($ecashChannels)) {
 		}
 
 		$hasExisting = !empty($existingProofs[$channelKey]);
+		if ($approvedEdit !== null) {
+			$proofPath = trim((string)($ecashProofUploads[$channelKey] ?? ''));
+			if ($proofPath === '' && $hasExisting) {
+				$proofPath = (string)$existingProofs[$channelKey];
+			}
+			if ($proofPath === '') {
+				$displayChannel = preg_replace('/^ECASH_/', '', (string)$channelKey);
+				$displayChannel = ucwords(strtolower(str_replace('_', ' ', $displayChannel)));
+				$cashdrawer->errors['ecash_proof_' . strtolower(substr((string)$channelKey, 6))] = "Photo proof for {$displayChannel} is no longer available. Ask the operations manager to resubmit the edit.";
+			}
+			$ecashProofUploads[$channelKey] = $proofPath !== '' ? $proofPath : null;
+			continue;
+		}
 		$uploadedProof = $req->upload_files($fileKey);
 		$hasNewUpload = !empty($uploadedProof) && empty($req->upload_errors[$fileKey]);
 		if (!$hasNewUpload && !$hasExisting) {
@@ -175,16 +203,97 @@ if (!empty($cashdrawer->errors)) {
 	return;
 }
 
+// Operations manager edits are stored as proposals; no drawer balance changes occur before admin approval.
+$session = get_session();
+$rolesRaw = $session->roles ?? [];
+if (!is_array($rolesRaw)) {
+	$rolesRaw = [$rolesRaw];
+}
+$rolesLower = array_map(static function ($role): string {
+	return strtolower(trim((string)$role));
+}, $rolesRaw);
+$roleDb = new \Core\Database;
+$userRoleRows = $roleDb->query(
+	"SELECT ur.role
+	 FROM user_roles_map urm
+	 INNER JOIN user_roles ur ON ur.id = urm.role_id
+	 WHERE urm.user_id = :user_id AND urm.disabled = 0",
+	['user_id' => (int)($session->id ?? 0)]
+) ?: [];
+if ($roleDb->has_error) {
+	error_log('[EditCashdrawerApproval] Unable to verify editor roles: ' . (string)$roleDb->error);
+	$cashdrawer->errors['user_id'] = 'Editor roles could not be verified. No cashdrawer changes were made.';
+	set_value('errors', array_merge($cashdrawer->errors, $req->upload_errors));
+	return;
+}
+foreach ($userRoleRows as $userRoleRow) {
+	$rolesLower[] = strtolower(trim((string)($userRoleRow->role ?? '')));
+}
+$rolesLower = array_values(array_unique($rolesLower));
+$isOpsManager = in_array('operations manager', $rolesLower, true);
+if ($isOpsManager && !user_can('is_admin') && $approvedEdit === null) {
+	try {
+		$db = new \Core\Database;
+		operations_account_ensure_cashdrawer_edit_approval_schema($db);
+		$pending = $db->query(
+			"SELECT id FROM cashdrawer_edit_approval_requests
+			 WHERE drawer_id = :drawer_id AND status IN ('pending', 'processing')
+			 LIMIT 1",
+			['drawer_id' => (int)$row->id]
+		) ?: [];
+		if (!empty($pending)) {
+			message_fail('An edit for this cashdrawer is already awaiting administrator review.');
+			redirect('admin/operations_accounts/edit_cashdrawer/' . (int)$row->id);
+		}
+
+		$requestPost = $postdata;
+		foreach (array_keys($requestPost) as $field) {
+			if (strpos((string)$field, 'ecash_') !== 0) {
+				continue;
+			}
+			$rawKey = strtoupper(substr((string)$field, 6));
+			$sanitizedKey = trim((string)preg_replace('/[^A-Z0-9]+/', '_', $rawKey), '_');
+			$channelKey = 'ECASH_' . ($sanitizedKey !== '' ? $sanitizedKey : 'CUSTOM');
+			if (operations_account_is_shared_channel_key($channelKey)) {
+				unset($requestPost[$field]);
+			}
+		}
+		$requestData = ['post' => $requestPost];
+		unset($requestData['post']['csrf']);
+		$requestDataJson = json_encode($requestData, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+		$proofDataJson = json_encode($ecashProofUploads, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+		if (!is_string($requestDataJson) || !is_string($proofDataJson)) {
+			throw new \RuntimeException('The proposed cashdrawer edit could not be encoded safely.');
+		}
+		$db->query(
+			"INSERT INTO cashdrawer_edit_approval_requests
+			 (drawer_id, requested_by, request_data, proof_data, base_date_updated, status, date_created)
+			 VALUES (:drawer_id, :requested_by, :request_data, :proof_data, :base_date_updated, 'pending', :date_created)",
+			[
+				'drawer_id' => (int)$row->id,
+				'requested_by' => (int)($session->id ?? 0),
+				'request_data' => $requestDataJson,
+				'proof_data' => $proofDataJson,
+				'base_date_updated' => !empty($row->date_updated) && $row->date_updated !== '0000-00-00 00:00:00' ? $row->date_updated : null,
+				'date_created' => date('Y-m-d H:i:s'),
+			]
+		);
+		if ($db->has_error) {
+			throw new \RuntimeException('Unable to save the pending edit: ' . (string)$db->error);
+		}
+	} catch (\Throwable $e) {
+		error_log('[EditCashdrawerApproval] ' . $e->getMessage());
+		$cashdrawer->errors['denos'] = 'The edit could not be submitted for administrator approval. No drawer data was changed.';
+		set_value('errors', array_merge($cashdrawer->errors, $req->upload_errors));
+		return;
+	}
+	message_success('Cashdrawer edit submitted for administrator approval. The changes are not active yet.');
+	redirect('admin/operations_accounts');
+}
+
 // Persist CFA rates to settings if operations manager posted them
 try {
-	$session = get_session();
-	$rolesRaw = $session->roles ?? [];
-	if (!is_array($rolesRaw)) {
-		$rolesRaw = [$rolesRaw];
-	}
-	$rolesLower = array_map('strtolower', $rolesRaw);
-	$isOpsManager = in_array('operations manager', $rolesLower, true);
-	if ($isOpsManager) {
+	if ($isOpsManager || $approvedEdit !== null) {
 		$buyingRatePost  = isset($postdata['buying_rate'])  ? (float)$postdata['buying_rate']  : null;
 		$sellingRatePost = isset($postdata['selling_rate']) ? (float)$postdata['selling_rate'] : null;
 		if ($buyingRatePost !== null || $sellingRatePost !== null) {
@@ -512,6 +621,29 @@ try {
 	]);
 } catch (\Throwable $e) {
 	// Logging should never block a cashdrawer correction.
+}
+
+if ($approvedEdit !== null) {
+	try {
+		$db = new \Core\Database;
+		$db->query(
+			"UPDATE cashdrawer_edit_approval_requests
+			 SET status = 'approved', reviewed_by = :reviewed_by, reviewed_at = :reviewed_at
+			 WHERE id = :id AND status = 'processing'",
+			[
+				'reviewed_by' => (int)($session->id ?? 0),
+				'reviewed_at' => date('Y-m-d H:i:s'),
+				'id' => (int)$approvedEdit['request_id'],
+			]
+		);
+		if ($db->has_error || (int)$db->affected_rows !== 1) {
+			throw new \RuntimeException('The drawer was updated but the approval request status could not be finalized.');
+		}
+	} catch (\Throwable $e) {
+		error_log('[EditCashdrawerApproval] ' . $e->getMessage());
+		message_fail('The drawer changes were applied, but the approval record could not be finalized. Please contact an administrator before retrying.');
+		redirect('admin/operations_accounts/cashdrawer_edit_approvals');
+	}
 }
 
 message_success("Cashdrawer updated successfully!");

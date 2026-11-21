@@ -12,8 +12,8 @@ $normalizeDateFilter = static function ($value): string {
 	[$year, $month, $day] = array_map('intval', explode('-', $value));
 	return checkdate($month, $day, $year) ? $value : '';
 };
-$rawDateFrom = $_GET['start_date'] ?? null;
-$rawDateTo = $_GET['end_date'] ?? null;
+$rawDateFrom = $statementFilters['start_date'] ?? ($_GET['start_date'] ?? null);
+$rawDateTo = $statementFilters['end_date'] ?? ($_GET['end_date'] ?? null);
 $dateFromInput = is_string($rawDateFrom) ? trim($rawDateFrom) : '';
 $dateToInput = is_string($rawDateTo) ? trim($rawDateTo) : '';
 $dateFrom = $normalizeDateFilter($dateFromInput);
@@ -133,9 +133,9 @@ $statementQuery = http_build_query($statementQueryParams);
 	.channel-statement-actions { display: flex; flex-wrap: wrap; gap: .55rem; }
 	.channel-statement-actions .btn { border-radius: .65rem; font-weight: 650; }
 	.channel-statement-filter {
-		display: flex;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto;
 		align-items: end;
-		flex-wrap: wrap;
 		gap: .65rem;
 		margin: 1rem 0;
 		padding: .9rem 1rem;
@@ -144,36 +144,43 @@ $statementQuery = http_build_query($statementQueryParams);
 		background: var(--statement-subtle);
 	}
 	.channel-statement-filter label { display: block; margin-bottom: .25rem; color: var(--statement-muted); font-size: .72rem; font-weight: 750; }
-	.channel-statement-filter .form-control { min-width: 10rem; border-color: var(--statement-border); background-color: var(--statement-bg); color: var(--statement-text); }
+	.channel-statement-filter .form-control { width: 100%; min-width: 0; border-color: var(--statement-border); background-color: var(--statement-bg); color: var(--statement-text); }
 	.channel-statement-filter .btn { min-height: 38px; border-radius: .55rem; font-weight: 650; }
 	.channel-statement-filter-note { margin: 0 0 .75rem; color: var(--statement-muted); font-size: .8rem; }
 	.channel-statement-summary {
-		width: 100%;
+		display: grid;
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: .65rem;
 		margin: 1rem 0 1.25rem;
-		border-collapse: separate;
-		border-spacing: .65rem 0;
-		table-layout: fixed;
-	}
-	.channel-statement-summary td {
-		width: 20%;
-		padding: 0;
-		border: 0;
-		vertical-align: top;
 	}
 	.channel-statement-summary-card {
-		height: 100%;
-		padding: .85rem .95rem;
+		display: flex;
+		min-width: 0;
+		min-height: 6rem;
+		flex-direction: column;
+		justify-content: space-between;
+		gap: .7rem;
+		padding: .85rem;
 		border: 1px solid var(--statement-border);
 		border-top: 3px solid #16834a;
 		border-radius: .7rem;
 		background: var(--statement-subtle);
 	}
-	.channel-statement-summary td:nth-child(2) .channel-statement-summary-card { border-top-color: #3184cf; }
-	.channel-statement-summary td:nth-child(3) .channel-statement-summary-card { border-top-color: #16834a; }
-	.channel-statement-summary td:nth-child(4) .channel-statement-summary-card { border-top-color: #d65b63; }
-	.channel-statement-summary td:nth-child(5) .channel-statement-summary-card { border-top-color: #7956bd; }
-	.channel-statement-summary-label { display: block; margin-bottom: .35rem; color: var(--statement-muted); font-size: .72rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
-	.channel-statement-summary-value { display: block; color: var(--statement-text); font-size: 1rem; font-weight: 750; overflow-wrap: anywhere; }
+	.channel-statement-summary-card:nth-child(2) { border-top-color: #3184cf; }
+	.channel-statement-summary-card:nth-child(3) { border-top-color: #16834a; }
+	.channel-statement-summary-card:nth-child(4) { border-top-color: #d65b63; }
+	.channel-statement-summary-card:nth-child(5) { border-top-color: #7956bd; }
+	.channel-statement-summary-label { display: block; color: var(--statement-muted); font-size: .68rem; font-weight: 750; letter-spacing: .045em; line-height: 1.3; text-transform: uppercase; }
+	.channel-statement-summary-value { display: block; color: var(--statement-text); font-size: clamp(.95rem, 1.25vw, 1.2rem); font-weight: 750; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+	.channel-statement-summary--pdf { display: table; width: 100%; border-collapse: separate; border-spacing: 5px 0; table-layout: fixed; }
+	.channel-statement-summary--pdf td { width: 20%; padding: 0; border: 0; vertical-align: top; }
+	.channel-statement-summary--pdf .channel-statement-summary-card { height: 100%; min-height: 0; padding: 8px; border: 1px solid #d7e0e9; border-top: 3px solid #16834a; border-radius: .7rem; background: #f3f6fa; }
+	.channel-statement-summary--pdf td:nth-child(2) .channel-statement-summary-card { border-top-color: #3184cf; }
+	.channel-statement-summary--pdf td:nth-child(3) .channel-statement-summary-card { border-top-color: #16834a; }
+	.channel-statement-summary--pdf td:nth-child(4) .channel-statement-summary-card { border-top-color: #d65b63; }
+	.channel-statement-summary--pdf td:nth-child(5) .channel-statement-summary-card { border-top-color: #7956bd; }
+	.channel-statement-summary--pdf .channel-statement-summary-label { color: #5b6b7c; font-size: 7pt; }
+	.channel-statement-summary--pdf .channel-statement-summary-value { color: #1d2b40; font-size: 9pt; }
 	.channel-statement-ledger-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin: .25rem 0 .65rem; }
 	.channel-statement-ledger-heading h3 { margin: 0; color: var(--statement-text); font-size: 1rem; font-weight: 750; }
 	.channel-statement-count { padding: .25rem .65rem; border: 1px solid var(--statement-border); border-radius: 999px; background: var(--statement-subtle); color: var(--statement-muted); font-size: .75rem; font-weight: 700; }
@@ -211,14 +218,6 @@ $statementQuery = http_build_query($statementQueryParams);
 	.channel-statement--pdf .channel-statement-description { color: #e0eceb; }
 	.channel-statement--pdf .channel-statement-filter,
 	.channel-statement--pdf .channel-statement-filter-note { display: none; }
-	.channel-statement--pdf .channel-statement-summary { border-spacing: 5px 0; }
-	.channel-statement--pdf .channel-statement-summary-card { padding: 8px; border: 1px solid #d7e0e9; border-top: 3px solid #16834a; background: #f3f6fa; }
-	.channel-statement--pdf .channel-statement-summary td:nth-child(2) .channel-statement-summary-card { border-top-color: #3184cf; }
-	.channel-statement--pdf .channel-statement-summary td:nth-child(3) .channel-statement-summary-card { border-top-color: #16834a; }
-	.channel-statement--pdf .channel-statement-summary td:nth-child(4) .channel-statement-summary-card { border-top-color: #d65b63; }
-	.channel-statement--pdf .channel-statement-summary td:nth-child(5) .channel-statement-summary-card { border-top-color: #7956bd; }
-	.channel-statement--pdf .channel-statement-summary-label { color: #5b6b7c; font-size: 7pt; }
-	.channel-statement--pdf .channel-statement-summary-value { color: #1d2b40; font-size: 9pt; }
 	.channel-statement--pdf .channel-statement-table-wrap { overflow: visible; border: 1px solid #ccd6e0; }
 	.channel-statement--pdf .channel-statement-table { color: #1d2b40; font-size: 8pt; }
 	.channel-statement--pdf .channel-statement-table thead { display: table-header-group; }
@@ -232,21 +231,58 @@ $statementQuery = http_build_query($statementQueryParams);
 	.channel-statement--pdf .statement-credit { color: #087443; }
 	.channel-statement--pdf .statement-debit { color: #b8323d; }
 	.channel-statement--pdf .channel-statement-footer { color: #5b6b7c; }
+	@media (max-width: 1100px) {
+		.channel-statement-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+	}
 	@media (max-width: 900px) {
-		.channel-statement-summary { border-spacing: .35rem 0; }
-		.channel-statement-summary td { padding-bottom: .5rem; }
-		.channel-statement-summary-card { padding: .65rem; }
-		.channel-statement-summary-value { font-size: .88rem; }
+		.channel-statement-hero { display: block; }
+		.channel-statement-actions { margin-top: .9rem; }
+		.channel-statement-filter { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.channel-statement-filter .btn { width: 100%; }
+	}
+	@media (min-width: 701px) and (max-width: 991px) {
+		.channel-statement-table { min-width: 820px; }
 	}
 	@media (max-width: 700px) {
-		.channel-statement-hero { display: block; }
-		.channel-statement-actions { margin-top: 1rem; }
-		.channel-statement-filter { align-items: stretch; }
-		.channel-statement-filter .form-control { min-width: 0; width: 100%; }
-		.channel-statement-summary, .channel-statement-summary tbody, .channel-statement-summary tr { display: block; }
-		.channel-statement-summary td { display: inline-block; width: 49%; padding: 0 .2rem .45rem; }
-		.channel-statement-table { min-width: 940px; }
-		.channel-statement-footer { display: block; }
+		.channel-statement { padding: .65rem; border-radius: .75rem; }
+		.channel-statement-hero { padding: 1rem; }
+		.channel-statement-title { font-size: 1.35rem; }
+		.channel-statement-actions .btn { flex: 1 1 auto; }
+		.channel-statement-filter { grid-template-columns: minmax(0, 1fr); padding: .75rem; }
+		.channel-statement-filter .btn { width: 100%; }
+		.channel-statement-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+		.channel-statement-summary-card { min-height: 5.2rem; padding: .7rem; }
+		.channel-statement-summary-value { font-size: 1rem; }
+		.channel-statement-ledger-heading { align-items: flex-start; }
+		.channel-statement-table-wrap { overflow: visible; border: 0; }
+		.channel-statement-table,
+		.channel-statement-table tbody { display: block; width: 100%; min-width: 0; }
+		.channel-statement-table thead { display: none; }
+		.channel-statement-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .25rem .5rem; margin-bottom: .65rem; padding: .65rem; border: 1px solid var(--statement-border); border-radius: .7rem; background: var(--statement-bg); }
+		.channel-statement-table tbody tr:nth-child(even) { background: var(--statement-bg); }
+		.channel-statement-table td { display: flex; min-width: 0; flex-direction: column; gap: .2rem; padding: .35rem; border: 0; font-size: .78rem; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+		.channel-statement-table td:before { color: var(--statement-muted); content: attr(data-label); font-size: .62rem; font-weight: 750; letter-spacing: .035em; text-transform: uppercase; }
+		.channel-statement-table .statement-date,
+		.channel-statement-table .statement-reference { grid-column: 1 / -1; }
+		.channel-statement-table .statement-number { text-align: left; white-space: normal; }
+		.channel-statement-empty { display: block !important; grid-column: 1 / -1; padding: 1.25rem .5rem !important; text-align: center !important; }
+		.channel-statement-empty:before { content: none !important; }
+		.channel-statement-footer { display: block; line-height: 1.5; }
+		.channel-statement-footer span { display: block; }
+	}
+	@media (max-width: 380px) {
+		.channel-statement-summary { grid-template-columns: minmax(0, 1fr); }
+		.channel-statement-summary-card { min-height: 4.5rem; }
+	}
+	@media (max-width: 700px) {
+		.channel-statement--pdf .channel-statement-summary { display: table; }
+		.channel-statement--pdf .channel-statement-table-wrap { overflow: visible; }
+		.channel-statement--pdf .channel-statement-table { display: table; width: 100%; min-width: 0; }
+		.channel-statement--pdf .channel-statement-table thead { display: table-header-group; }
+		.channel-statement--pdf .channel-statement-table tbody { display: table-row-group; }
+		.channel-statement--pdf .channel-statement-table tbody tr { display: table-row; margin: 0; padding: 0; border: 0; border-radius: 0; }
+		.channel-statement--pdf .channel-statement-table td { display: table-cell; padding: 6px 5px; border-bottom: 1px solid #d7e0e9; text-align: left; }
+		.channel-statement--pdf .channel-statement-table td:before { content: none; }
 	}
 	@media print {
 		.channel-statement { max-width: none; padding: 0; border: 0; box-shadow: none; }
@@ -267,9 +303,6 @@ $statementQuery = http_build_query($statementQueryParams);
 		</div>
 		<?php if (!$isPdfExport): ?>
 			<nav class="channel-statement-actions" aria-label="Statement actions">
-				<a class="btn btn-sm btn-light" href="<?= $escape($baseRoute . '/view_cashdrawer/' . (int)($statement['drawer_id'] ?? 0)) ?>">
-					<i class="fa fa-arrow-left me-1" aria-hidden="true"></i> Back to drawer
-				</a>
 				<a class="btn btn-sm btn-danger" href="<?= $escape($baseRoute . '/export_channel_statement_pdf/' . (int)($statement['drawer_id'] ?? 0) . '?' . $statementQuery) ?>" target="_blank" rel="noopener">
 					<i class="fa fa-file-pdf me-1" aria-hidden="true"></i> Export PDF
 				</a>
@@ -291,7 +324,7 @@ $statementQuery = http_build_query($statementQueryParams);
 			</div>
 			<button class="btn btn-sm btn-primary" type="submit"><i class="fa fa-filter me-1" aria-hidden="true"></i> Apply dates</button>
 			<?php if ($hasDateFilter): ?>
-				<a class="btn btn-sm btn-outline-secondary" href="<?= $escape($statementPath . '?' . http_build_query($statementParams)) ?>">Clear dates</a>
+				<button class="btn btn-sm btn-outline-secondary" type="button" data-statement-clear>Clear dates</button>
 			<?php endif; ?>
 		</form>
 		<?php if ($invalidDateFilter): ?>
@@ -304,15 +337,40 @@ $statementQuery = http_build_query($statementQueryParams);
 		</p>
 	<?php endif; ?>
 
-	<table class="channel-statement-summary" aria-label="Statement summary">
-		<tbody><tr>
-			<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Channel</span><strong class="channel-statement-summary-value"><?= $escape($statement['channel_label'] ?? '') ?></strong></div></td>
-			<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Opening snapshots</span><strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($openingTotal) ?></strong></div></td>
-			<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Total credits</span><strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($creditTotal) ?></strong></div></td>
-			<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Total debits</span><strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($debitTotal) ?></strong></div></td>
-			<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Latest recorded balance</span><strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($closingTotal) ?></strong></div></td>
-		</tr></tbody>
-	</table>
+	<?php if ($isPdfExport): ?>
+		<table class="channel-statement-summary channel-statement-summary--pdf" aria-label="Statement summary">
+			<tbody><tr>
+				<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Channel</span><strong class="channel-statement-summary-value"><?= $escape($statement['channel_label'] ?? '') ?></strong></div></td>
+				<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Opening snapshot total</span><strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($openingTotal) ?></strong></div></td>
+				<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Total credits</span><strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($creditTotal) ?></strong></div></td>
+				<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Total debits</span><strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($debitTotal) ?></strong></div></td>
+				<td><div class="channel-statement-summary-card"><span class="channel-statement-summary-label">Latest balance</span><strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($closingTotal) ?></strong></div></td>
+			</tr></tbody>
+		</table>
+	<?php else: ?>
+		<div class="channel-statement-summary" role="group" aria-label="Statement summary">
+			<div class="channel-statement-summary-card">
+				<span class="channel-statement-summary-label">Channel</span>
+				<strong class="channel-statement-summary-value"><?= $escape($statement['channel_label'] ?? '') ?></strong>
+			</div>
+			<div class="channel-statement-summary-card">
+				<span class="channel-statement-summary-label">Opening snapshot total</span>
+				<strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($openingTotal) ?></strong>
+			</div>
+			<div class="channel-statement-summary-card">
+				<span class="channel-statement-summary-label">Total credits</span>
+				<strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($creditTotal) ?></strong>
+			</div>
+			<div class="channel-statement-summary-card">
+				<span class="channel-statement-summary-label">Total debits</span>
+				<strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($debitTotal) ?></strong>
+			</div>
+			<div class="channel-statement-summary-card">
+				<span class="channel-statement-summary-label">Latest balance</span>
+				<strong class="channel-statement-summary-value"><?= $currency ?> <?= $formatMoney($closingTotal) ?></strong>
+			</div>
+		</div>
+	<?php endif; ?>
 
 	<div class="channel-statement-ledger-heading">
 		<h3><i class="fa fa-list-ul me-1" aria-hidden="true"></i> Movement ledger</h3>
@@ -338,23 +396,23 @@ $statementQuery = http_build_query($statementQueryParams);
 					<?php foreach ($entries as $entry): ?>
 						<?php $movement = trim((string)($entry['description'] ?? '')); ?>
 						<tr>
-							<td class="statement-date">
+							<td class="statement-date" data-label="Date / drawer">
 								<strong><?= $escape($formatDate($entry['date'] ?? '')) ?></strong>
 								<span class="statement-drawer">Drawer #<?= (int)($entry['drawer_id'] ?? 0) ?></span>
 							</td>
-							<td class="statement-reference">
+							<td class="statement-reference" data-label="Reference / movement">
 								<?php if (($entry['reference'] ?? '') !== ''): ?><strong>TX #<?= $escape($entry['reference']) ?></strong><?php endif; ?>
 								<span class="statement-movement"><?= $escape($movement) ?></span>
 								<span class="statement-status"><?= $escape($entry['status'] ?? '') ?></span>
 								<?php if (!empty($entry['actor'])): ?><span class="statement-actor">Recorded by <?= $escape($entry['actor']) ?></span><?php endif; ?>
 							</td>
 							<?php if (($statement['channel_type'] ?? '') === 'cash'): ?>
-								<td><?= ($entry['denomination'] ?? '') !== '' ? $escape(number_format((float)$entry['denomination'], $currency === 'CFA' ? 0 : 2) . ' × ' . (int)($entry['count'] ?? 0)) : '—' ?></td>
+								<td data-label="Denomination × count"><?= ($entry['denomination'] ?? '') !== '' ? $escape(number_format((float)$entry['denomination'], $currency === 'CFA' ? 0 : 2) . ' × ' . (int)($entry['count'] ?? 0)) : '—' ?></td>
 							<?php endif; ?>
-							<td class="statement-number"><?= (($statement['channel_type'] ?? '') === 'ecash' || $movement === 'Opening balance snapshot' || (float)($entry['opening'] ?? 0) != 0.0) ? $currency . ' ' . $formatMoney($entry['opening']) : '—' ?></td>
-							<td class="statement-number statement-credit"><?= (float)($entry['credit'] ?? 0) != 0.0 ? '+' . $currency . ' ' . $formatMoney($entry['credit']) : '—' ?></td>
-							<td class="statement-number statement-debit"><?= (float)($entry['debit'] ?? 0) != 0.0 ? '−' . $currency . ' ' . $formatMoney($entry['debit']) : '—' ?></td>
-							<td class="statement-number"><?= ($entry['closing'] ?? null) !== null ? $currency . ' ' . $formatMoney($entry['closing']) : '—' ?></td>
+							<td class="statement-number" data-label="Opening"><?= (($statement['channel_type'] ?? '') === 'ecash' || $movement === 'Opening balance snapshot' || (float)($entry['opening'] ?? 0) != 0.0) ? $currency . ' ' . $formatMoney($entry['opening']) : '—' ?></td>
+							<td class="statement-number statement-credit" data-label="Credit / in"><?= (float)($entry['credit'] ?? 0) != 0.0 ? '+' . $currency . ' ' . $formatMoney($entry['credit']) : '—' ?></td>
+							<td class="statement-number statement-debit" data-label="Debit / out"><?= (float)($entry['debit'] ?? 0) != 0.0 ? '−' . $currency . ' ' . $formatMoney($entry['debit']) : '—' ?></td>
+							<td class="statement-number" data-label="Closing / amount"><?= ($entry['closing'] ?? null) !== null ? $currency . ' ' . $formatMoney($entry['closing']) : '—' ?></td>
 						</tr>
 					<?php endforeach; ?>
 				<?php endif; ?>

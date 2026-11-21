@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/users-manager/helpers/shared-account-assignments.php';
 require_once __DIR__ . '/helpers/channel-statement.php';
+require_once __DIR__ . '/helpers/cashdrawer-edit-approvals.php';
 
 /**
  * Plugin name: MyWallet
@@ -3898,6 +3899,9 @@ add_action('controller',function(){
 		if(URL(2) == 'add_cashdrawer'){
 			require plugin_path('controllers/add_cashdrawer-controller.php');
 		}else
+		if(URL(2) == 'cashdrawer_edit_approvals'){
+			require plugin_path('controllers/review_cashdrawer_edit-controller.php');
+		}else
 		if(URL(2) == 'edit_cashdrawer'){			
 			$cashdrawer = new \MyWallets\Cashdrawer;
 			$row = $cashdrawer->first(['id'=>$id]);
@@ -4030,6 +4034,28 @@ add_action('basic-admin_main_content',function(){
 				$settings = null;
 			}
 			require plugin_path('views/admin/cashdrawers/add.php');
+		}else
+		if(URL(2) == 'cashdrawer_edit_approvals'){
+			if (!user_can('is_admin')) {
+				message_fail('Only an administrator can review cashdrawer edit requests.');
+				redirect($admin_route . '/' . $plugin_route);
+			}
+			try {
+				$approvalDb = new \Core\Database;
+				operations_account_ensure_cashdrawer_edit_approval_schema($approvalDb);
+				$cashdrawerEditRequests = $approvalDb->query(
+					"SELECT r.*, TRIM(CONCAT_WS(' ', NULLIF(u.first_name, ''), NULLIF(u.last_name, ''))) AS requester_name
+					 FROM cashdrawer_edit_approval_requests r
+					 LEFT JOIN users u ON u.id = r.requested_by
+					 WHERE r.status IN ('pending', 'processing')
+					 ORDER BY r.date_created ASC, r.id ASC"
+				) ?: [];
+			} catch (\Throwable $e) {
+				error_log('[CashdrawerEditApproval] Unable to load pending requests: ' . $e->getMessage());
+				$cashdrawerEditRequests = [];
+				$cashdrawerEditApprovalError = 'Cashdrawer edit approvals are unavailable right now.';
+			}
+			require plugin_path('views/admin/cashdrawers/edit-approvals.php');
 		}else
 		if(URL(2) == 'add_account'){			
 			$mywallet_role = new \MyWallets\User_role;

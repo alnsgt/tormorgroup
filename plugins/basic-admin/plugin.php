@@ -353,7 +353,7 @@ add_action('controller', function () {
 
         // Only load the cashdrawer controller for supported cashdrawer AJAX actions
 
-        if (in_array($action, ['view-drawer', 'view-drawer-by-id', 'exchange-ecash', 'normalize-ecash-channels'], true)) {
+        if (in_array($action, ['view-drawer', 'view-drawer-by-id', 'view-channel-statement', 'exchange-ecash', 'normalize-ecash-channels'], true)) {
 
             // Pass decoded JSON to the controller so it does not re-read php://input
 

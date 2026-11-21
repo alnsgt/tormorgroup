@@ -174,6 +174,11 @@
                 </button>
             </a>
             <?php endif?>
+            <?php if(user_can('is_admin')): ?>
+            <a class="btn btn-outline-primary btn-sm" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/cashdrawer_edit_approvals">
+                <i class="fa-solid fa-clipboard-check"></i> Edit approvals
+            </a>
+            <?php endif; ?>
             <select class="form-select form-select-sm w-auto ms-2" data-role="ops-page-size">
                 <?php $pageLimit = isset($pager) ? (int)$pager->limit : 10; ?>
                 <option value="5"  <?=$pageLimit == 5  ? 'selected' : ''?>>5</option>
