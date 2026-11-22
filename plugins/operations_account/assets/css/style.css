@@ -134,20 +134,31 @@ body{
 		display:grid !important;
 		grid-template-columns:minmax(0, 1fr) 76px;
 		justify-content:stretch !important;
-		align-items:end !important;
+		align-items:center !important;
 		gap:.5rem !important;
 	}
 
-	#opsCashdrawersRegion .ops-cashdrawer-actions a,
-	#opsCashdrawersRegion .ops-cashdrawer-actions button{
-		width:100%;
-		white-space:normal;
+	#opsCashdrawersRegion .ops-cashdrawer-primary-actions{
+		display:flex;
+		flex-wrap:wrap;
+		align-items:center;
+		gap:.5rem;
+		min-width:0;
+	}
+
+	#opsCashdrawersRegion .ops-cashdrawer-primary-actions a{
+		display:inline-flex;
+		align-items:center;
+		justify-content:center;
+		flex:1 1 auto;
+		width:auto;
+		white-space:nowrap;
 	}
 
 	#opsCashdrawersRegion .ops-cashdrawer-actions [data-role="ops-page-size"]{
 		width:76px !important;
 		min-width:76px;
-		margin-left:0 !important;
+		margin:0 !important;
 		justify-self:end;
 	}
 
@@ -285,20 +296,31 @@ body{
 		display:grid !important;
 		grid-template-columns:minmax(0, 1fr) 76px;
 		justify-content:stretch !important;
-		align-items:end !important;
+		align-items:center !important;
 		gap:.5rem !important;
 	}
 
-	#opsCashdrawersRegion .ops-cashdrawer-actions a,
-	#opsCashdrawersRegion .ops-cashdrawer-actions button{
-		width:100%;
-		white-space:normal;
+	#opsCashdrawersRegion .ops-cashdrawer-primary-actions{
+		display:flex;
+		flex-wrap:wrap;
+		align-items:center;
+		gap:.5rem;
+		min-width:0;
+	}
+
+	#opsCashdrawersRegion .ops-cashdrawer-primary-actions a{
+		display:inline-flex;
+		align-items:center;
+		justify-content:center;
+		flex:1 1 auto;
+		width:auto;
+		white-space:nowrap;
 	}
 
 	#opsCashdrawersRegion .ops-cashdrawer-actions [data-role="ops-page-size"]{
 		width:76px !important;
 		min-width:76px;
-		margin-left:0 !important;
+		margin:0 !important;
 		justify-self:end;
 	}
 
@@ -683,6 +705,71 @@ body{
 #opsCashdrawersRegion .select2-container--default .select2-results__option--highlighted{
 	background:#edf3fa !important;
 	color:#24334a !important;
+}
+
+#opsCashdrawersRegion .ops-cashdrawer-actions{
+	display:flex;
+	align-items:center;
+	justify-content:flex-end;
+	gap:.625rem;
+	min-width:0;
+}
+
+#opsCashdrawersRegion .ops-cashdrawer-primary-actions{
+	display:flex;
+	align-items:center;
+	justify-content:flex-end;
+	gap:.5rem;
+	min-width:0;
+}
+
+#opsCashdrawersRegion .ops-cashdrawer-primary-actions a{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	white-space:nowrap;
+	text-decoration:none;
+}
+
+#opsCashdrawersRegion .ops-cashdrawer-actions [data-role="ops-page-size"]{
+	width:76px;
+	min-width:76px;
+	margin:0;
+}
+
+#opsCashdrawersRegion .ops-cashdrawer-pending-badge{
+	display:inline-flex;
+	align-items:center;
+	gap:.3rem;
+	padding:.35em .65em;
+	border:1px solid #6f2e0d;
+	border-radius:50rem;
+	background-color:#8a3b12;
+	color:#fff !important;
+	font-weight:600;
+	line-height:1.2;
+	text-decoration:none;
+}
+
+#opsCashdrawersRegion a.ops-cashdrawer-pending-badge:hover{
+	background-color:#6f2e0d;
+	color:#fff !important;
+}
+
+#opsCashdrawersRegion .ops-cashdrawer-approval-count{
+	display:inline-flex;
+	align-items:center;
+	justify-content:center;
+	min-width:1.35rem;
+	height:1.35rem;
+	margin-left:.35rem;
+	padding:0 .35rem;
+	border-radius:50rem;
+	background:#8a3b12;
+	color:#fff;
+	font-size:.75rem;
+	font-weight:700;
+	line-height:1;
 }
 
 #opsCashdrawersRegion .ops-cashdrawer-actions .btn-warning{

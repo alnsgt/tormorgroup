@@ -194,11 +194,43 @@
 		<?php
 			require_once plugin_path('helpers/cashdrawer-history.php');
 			$session = get_session();
-			$userRole = strtolower($session->roles[0] ?? '');
-			$isOpsManager = ($userRole === 'operations manager');
 			$isAdmin = user_can('is_admin');
 
 			$db = new \Core\Database;
+			$sessionRoles = is_array($session->roles ?? null) ? $session->roles : [];
+			$isOpsManager = in_array(
+				'operations manager',
+				array_map(static fn($role): string => strtolower(trim((string)$role)), $sessionRoles),
+				true
+			);
+			$roleRows = $db->query(
+				"SELECT ur.role
+				 FROM user_roles_map urm
+				 INNER JOIN user_roles ur ON ur.id = urm.role_id
+				 WHERE urm.user_id = :user_id AND urm.disabled = 0",
+				['user_id' => (int)($session->id ?? 0)]
+			) ?: [];
+			if (!$db->has_error) {
+				$isOpsManager = false;
+				foreach ($roleRows as $roleRow) {
+					if (strtolower(trim((string)($roleRow->role ?? ''))) === 'operations manager') {
+						$isOpsManager = true;
+						break;
+					}
+				}
+			} else {
+				error_log('[EditCashdrawerView] Unable to verify operations manager role: ' . (string)$db->error);
+			}
+			$cashdrawerApprovalAdmins = [];
+			$cashdrawerApprovalAdminError = '';
+			if($isOpsManager && !$isAdmin){
+				try{
+					$cashdrawerApprovalAdmins = operations_account_list_cashdrawer_approval_admins($db);
+				}catch(\Throwable $e){
+					error_log('[EditCashdrawerView] Unable to load eligible approval admins: ' . $e->getMessage());
+					$cashdrawerApprovalAdminError = 'Eligible administrators could not be loaded. Refresh and try again.';
+				}
+			}
 			$historySchemaError = '';
 			$hasUnclassifiedHistory = false;
 			$existingDenos = [];
@@ -382,17 +414,29 @@
 				<?php endif; ?>
 
 				<?php if($isOpsManager): ?>
+					<?php
+						$currentBuyingRate = isset($settings->buying_rate) && is_numeric($settings->buying_rate)
+							? number_format((float)$settings->buying_rate, 2, '.', '')
+							: '';
+						$currentSellingRate = isset($settings->selling_rate) && is_numeric($settings->selling_rate)
+							? number_format((float)$settings->selling_rate, 2, '.', '')
+							: '';
+					?>
 					<div class="alert alert-info mt-2">
 						<div class="fw-bold mb-1">CFA Exchange Configuration (Operations Manager)</div>
-						<div class="small">Current Buying rate (per CFA 1,000): GH&cent;<?=number_format($settings->buying_rate ?? 0, 2)?> &nbsp;|&nbsp; Current Selling rate (per CFA 1,000): GH&cent;<?=number_format($settings->selling_rate ?? 0, 2)?></div>
+						<?php if ($currentBuyingRate !== '' || $currentSellingRate !== ''): ?>
+							<div class="small">Current Buying rate (per CFA 1,000): GH&cent;<?=$currentBuyingRate !== '' ? $currentBuyingRate : 'Unavailable'?> &nbsp;|&nbsp; Current Selling rate (per CFA 1,000): GH&cent;<?=$currentSellingRate !== '' ? $currentSellingRate : 'Unavailable'?></div>
+						<?php else: ?>
+							<div class="small text-danger">Current CFA rates could not be loaded. Contact an administrator before submitting changes.</div>
+						<?php endif; ?>
 						<div class="row mt-2 g-2">
 							<div class="col-6">
 								<label class="form-label mb-0">Buying rate (CFA1,000 → GHS)</label>
-								<input type="number" step="0.01" min="0" name="buying_rate" class="form-control" value="<?=old_value('buying_rate', $settings->buying_rate ?? '')?>" required>
+								<input type="number" step="0.01" min="0" name="buying_rate" class="form-control" value="<?=old_value('buying_rate', $currentBuyingRate)?>" required>
 							</div>
 							<div class="col-6">
 								<label class="form-label mb-0">Selling rate (CFA1,000 → GHS)</label>
-								<input type="number" step="0.01" min="0" name="selling_rate" class="form-control" value="<?=old_value('selling_rate', $settings->selling_rate ?? '')?>" required>
+								<input type="number" step="0.01" min="0" name="selling_rate" class="form-control" value="<?=old_value('selling_rate', $currentSellingRate)?>" required>
 							</div>
 						</div>
 					</div>
@@ -430,6 +474,30 @@
 						<i class="fas fa-plus-circle"></i> Add E-Cash Channel
 					</button>
 				</div>
+
+				<?php if($isOpsManager && !$isAdmin): ?>
+					<div class="col-md-12 mt-3">
+						<label for="assigned_admin_id" class="form-label">Assign update for admin approval</label>
+						<select id="assigned_admin_id" name="assigned_admin_id" class="form-select" required>
+							<option value="">Select an eligible administrator</option>
+							<?php $selectedApprovalAdmin = (int)old_value('assigned_admin_id'); ?>
+							<?php foreach($cashdrawerApprovalAdmins as $approvalAdmin): ?>
+								<option value="<?=(int)$approvalAdmin['id']?>" <?=$selectedApprovalAdmin === (int)$approvalAdmin['id'] ? 'selected' : ''?>>
+									<?=esc($approvalAdmin['name'])?>
+								</option>
+							<?php endforeach; ?>
+						</select>
+						<small class="form-text text-muted">Only administrators who opened their own cashdrawer today and have a WhatsApp contact are available.</small>
+						<?php if($cashdrawerApprovalAdminError !== ''): ?>
+							<div class="small text-danger mt-1"><?=esc($cashdrawerApprovalAdminError)?></div>
+						<?php elseif(empty($cashdrawerApprovalAdmins)): ?>
+							<div class="small text-danger mt-1">No eligible administrator is available to approve this edit today.</div>
+						<?php endif; ?>
+						<?php if(!empty($errors['assigned_admin_id'])): ?>
+							<div class="small text-danger mt-1"><?=esc($errors['assigned_admin_id'])?></div>
+						<?php endif; ?>
+					</div>
+				<?php endif; ?>
 
 				<div class="col-md-12 ">
 					<label for="user_id" class="form-label">In charge</label>
@@ -657,6 +725,7 @@
 					const slug = (name) => String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 					const makeKey = (n) => 'ECASH_' + slug(n).toUpperCase();
 					const channelKey = network ? makeKey(network.name) : '';
+					const fieldName = network ? `ecash_${slug(network.name)}` : '';
 					const preset = channelKey && existingEcash && existingEcash[channelKey] ? existingEcash[channelKey] : null;
 					const presetAmt = preset ? (Number(preset.opening_balance || 0) || 0) : 0;
 					const presetAmtValue = presetAmt > 0 ? presetAmt.toFixed(2) : '';
@@ -667,7 +736,7 @@
 							<label title="${fullNetworkName}">${network ? truncatedNetworkName : 'Network'}</label>
 							<input type="hidden" class="ecash-network-name" value="${network ? fullNetworkName : ''}">
 						</div>
-						<input type="number" step="0.01" class="form-control form-control-sm ecash-amount" placeholder="Opening balance" value="${presetAmtValue}">
+						<input type="number" step="0.01" class="form-control form-control-sm ecash-amount" name="${fieldName}" placeholder="Opening balance" value="${presetAmtValue}">
 						<input type="file" class="d-none proof-input" accept="image/*">
 						<button type="button" class="recon-proof-thumb ecash-proof-thumb" data-proof-index="${index}" aria-label="Upload proof image">
 							<img class="${presetProof ? '' : 'd-none'}" alt="Proof preview" ${presetProof ? `src="<?=ROOT?>/${presetProof}"` : ''} />
@@ -975,8 +1044,8 @@
 
 				// ===== SERIALIZE E-CASH CHANNELS ON FORM SUBMIT (same as add.php) =====
 				form.addEventListener('submit', function(e) {
+					serializeDenos();
 					const channels = document.querySelectorAll('.ecash-channel-item');
-					const ecashData = {};
 					const slugCounts = {};
 
 					const buildSlug = (name) => {
@@ -1021,7 +1090,7 @@
 						if (networkName) {
 							const slug = buildSlug(networkName);
 							const fieldName = `ecash_${slug.toLowerCase()}`;
-							ecashData[fieldName] = amount;
+							amountInput.name = fieldName;
 
 							const proofInput = channel.querySelector('input.proof-input');
 							const existingProofImg = channel.querySelector('.ecash-proof-thumb img');
@@ -1058,13 +1127,6 @@
 						return;
 					}
 
-					Object.keys(ecashData).forEach(key => {
-						const input = document.createElement('input');
-						input.type = 'hidden';
-						input.name = key;
-						input.value = ecashData[key];
-						form.appendChild(input);
-					});
 				});
 
 				// Disable add-ecash button (same behavior as add.php)

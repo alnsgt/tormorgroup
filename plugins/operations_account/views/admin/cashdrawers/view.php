@@ -340,6 +340,90 @@ if(user_can('view_wallet_details')):
         transition: all 0.3s ease;
     }
 
+    .cashdrawer-edit-history,
+    .cashdrawer-edit-history h6,
+    .cashdrawer-edit-history-entry,
+    .cashdrawer-edit-history-entry .transaction-details,
+    .cashdrawer-edit-history-summary,
+    .cashdrawer-edit-history-actor,
+    .cashdrawer-edit-history-table,
+    .cashdrawer-edit-history-table > :not(caption) > * > * {
+        color: var(--bs-body-color);
+    }
+
+    .cashdrawer-edit-history-entry {
+        background: var(--bs-body-bg);
+    }
+
+    .cashdrawer-edit-history-date,
+    .cashdrawer-edit-history-denomination-title {
+        color: var(--bs-secondary-color);
+        font-size: 12px;
+    }
+
+    .cashdrawer-edit-history-actor {
+        margin-top: 6px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .cashdrawer-edit-history-summary {
+        margin-top: 8px;
+        font-size: 13px;
+    }
+
+    .cashdrawer-edit-history-summary > div + div {
+        margin-top: 4px;
+    }
+
+    .cashdrawer-edit-history-denominations {
+        margin-top: 10px;
+    }
+
+    .cashdrawer-edit-history-denomination-title {
+        margin-bottom: 6px;
+        font-weight: 600;
+    }
+
+    .cashdrawer-edit-history-table {
+        --bs-table-color: var(--bs-body-color);
+        --bs-table-bg: transparent;
+    }
+
+    .cashdrawer-edit-history-table > :not(caption) > * > * {
+        background-color: transparent;
+    }
+
+    .cashdrawer-opening-snapshot-history,
+    .cashdrawer-opening-snapshot-history h6,
+    .cashdrawer-opening-snapshot-entry,
+    .cashdrawer-opening-snapshot-entry .transaction-details,
+    .cashdrawer-opening-snapshot-table,
+    .cashdrawer-opening-snapshot-table > :not(caption) > * > * {
+        color: var(--bs-body-color);
+    }
+
+    .cashdrawer-opening-snapshot-entry {
+        background: var(--bs-body-bg);
+    }
+
+    .cashdrawer-opening-snapshot-date {
+        color: var(--bs-secondary-color);
+    }
+
+    .cashdrawer-opening-snapshot-label {
+        color: var(--bs-body-color);
+    }
+
+    .cashdrawer-opening-snapshot-table {
+        --bs-table-color: var(--bs-body-color);
+        --bs-table-bg: transparent;
+    }
+
+    .cashdrawer-opening-snapshot-table > :not(caption) > * > * {
+        background-color: transparent;
+    }
+
     .transaction-status {
         display: inline-block;
         padding: 4px 10px;
@@ -635,7 +719,7 @@ window.toggleDenoHistoryModal = function() {
                 <?php endif; ?>
 
                 <?php $cashdrawerEditHistory = $cashdrawer_edit_history ?? []; ?>
-                <div class="mb-3">
+                <div class="mb-3 cashdrawer-edit-history">
                     <h6 class="mb-2" style="font-weight:600;">Cashdrawer Edit History</h6>
                     <?php if (!empty($cashdrawerEditHistory)): ?>
                         <?php foreach ($cashdrawerEditHistory as $editLog): ?>
@@ -651,7 +735,7 @@ window.toggleDenoHistoryModal = function() {
 
                 <?php $openingSnapshotHistory = $opening_snapshot_history ?? []; ?>
                 <?php if (!empty($openingSnapshotHistory)): ?>
-                    <div class="mb-3">
+                    <div class="mb-3 cashdrawer-opening-snapshot-history">
                         <h6 class="mb-2" style="font-weight:600;">🏦 Opening Cashdrawer Snapshots</h6>
                         <?php foreach ($openingSnapshotHistory as $tx): ?>
                             <?php
@@ -669,12 +753,12 @@ window.toggleDenoHistoryModal = function() {
                                     }
                                 }
                             ?>
-                            <div class="transaction-item mb-3" data-history-index="opening-<?= esc($txId ? $txId : 'snapshot') ?>">
+                            <div class="transaction-item mb-3 cashdrawer-opening-snapshot-entry" data-history-index="opening-<?= esc($txId ? $txId : 'snapshot') ?>">
                                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                                     <span class="transaction-status status-opening"><?= esc($status) ?></span>
-                                    <span style="font-size:12px; color:var(--text-secondary);">
+                                    <span class="cashdrawer-opening-snapshot-date" style="font-size:12px;">
                                         <?= esc($dateCreated) ?>
-                                        <br><strong>Opening Snapshot</strong>
+                                        <br><strong class="cashdrawer-opening-snapshot-label">Opening Snapshot</strong>
                                     </span>
                                 </div>
                                 <div class="transaction-details">
@@ -685,7 +769,7 @@ window.toggleDenoHistoryModal = function() {
                                     <?= $renderTransactionDetail($tx) ?>
                                 </div>
                                 <div style="max-height:180px; overflow:auto; margin-top:6px;">
-                                    <table class="table table-sm mb-0">
+                                    <table class="table table-sm mb-0 cashdrawer-opening-snapshot-table">
                                         <thead>
                                             <tr>
                                                 <th>Curr</th>
@@ -857,6 +941,9 @@ window.toggleDenoHistoryModal = function() {
             </div>
         </div>
         <div class="action-buttons">
+            <?php if (!operations_account_is_current_cashdrawer($row)): ?>
+                <span class="badge rounded-pill bg-secondary">Historical · read-only</span>
+            <?php endif; ?>
             <button class="btn-modern btn-draft-pending" onclick="toggleDraftPendingPanel()">
                 <i class="fa fa-clock"></i>
                 <span id="draft-pending-count">0</span> Pending/Draft
@@ -870,14 +957,9 @@ window.toggleDenoHistoryModal = function() {
             <button class="btn-modern btn-export" data-export-drawer="<?= htmlspecialchars($row->id) ?>">
                 <i class="fa fa-file-pdf"></i> Export PDF
             </button>
-            <?php if(user_can('edit_wallet')): ?>
+            <?php if(user_can('edit_wallet') && operations_account_is_current_cashdrawer($row)): ?>
                 <a class="btn-modern" style="background: rgba(255,193,7,0.92); color:#1f2937; text-decoration:none;" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/edit_cashdrawer/<?=$row->id?>">
                     <i class="fa fa-pen"></i> Edit
-                </a>
-            <?php endif; ?>
-            <?php if(user_can('delete_wallet')): ?>
-                <a class="btn-modern" style="background: rgba(220,38,38,0.92); color:#fff; text-decoration:none;" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/delete_cashdrawer/<?=$row->id?>">
-                    <i class="fa fa-trash"></i> Delete
                 </a>
             <?php endif; ?>
         </div>
@@ -886,7 +968,7 @@ window.toggleDenoHistoryModal = function() {
     <?php if(!empty($cashdrawer_issue_report['issue_count']) && user_can('edit_wallet')): ?>
         <div class="alert alert-warning mt-3 mb-0" style="border-radius:14px; border:none;">
             <strong><?=number_format((int)$cashdrawer_issue_report['issue_count'])?> inconsistency<?=((int)$cashdrawer_issue_report['issue_count']) === 1 ? '' : 'ies'?> detected.</strong>
-            Admins can edit this drawer to repair the opening balances or delete and rebuild it if the ledger is beyond repair.
+            Only current-day cashdrawers can be edited. Historical cashdrawers are read-only.
         </div>
     <?php endif; ?>
 

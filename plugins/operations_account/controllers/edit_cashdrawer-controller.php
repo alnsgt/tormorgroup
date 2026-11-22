@@ -9,6 +9,10 @@ if (empty($row))
 	message_fail("Record not found");
 	return;
 }
+if (!operations_account_is_current_cashdrawer($row)) {
+	message_fail("Only the current day's cashdrawer can be edited. Historical cashdrawers are read-only.");
+	return;
+}
 
 $cashdrawer = new \MyWallets\Cashdrawer;
 
@@ -245,6 +249,19 @@ if ($isOpsManager && !user_can('is_admin') && $approvedEdit === null) {
 			message_fail('An edit for this cashdrawer is already awaiting administrator review.');
 			redirect('admin/operations_accounts/edit_cashdrawer/' . (int)$row->id);
 		}
+		$eligibleApprovalAdmins = operations_account_list_cashdrawer_approval_admins($db);
+		$assignedAdminId = (int)($postdata['assigned_admin_id'] ?? 0);
+		$eligibleAdminIds = array_map(
+			static fn(array $admin): int => (int)$admin['id'],
+			$eligibleApprovalAdmins
+		);
+		if (!in_array($assignedAdminId, $eligibleAdminIds, true)) {
+			$cashdrawer->errors['assigned_admin_id'] = empty($eligibleApprovalAdmins)
+				? 'No administrator who opened their own cashdrawer today and has a WhatsApp contact is available. No changes were submitted.'
+				: 'Select an eligible administrator to approve this edit. No changes were submitted.';
+			set_value('errors', array_merge($cashdrawer->errors, $req->upload_errors));
+			return;
+		}
 
 		$requestPost = $postdata;
 		foreach (array_keys($requestPost) as $field) {
@@ -267,11 +284,12 @@ if ($isOpsManager && !user_can('is_admin') && $approvedEdit === null) {
 		}
 		$db->query(
 			"INSERT INTO cashdrawer_edit_approval_requests
-			 (drawer_id, requested_by, request_data, proof_data, base_date_updated, status, date_created)
-			 VALUES (:drawer_id, :requested_by, :request_data, :proof_data, :base_date_updated, 'pending', :date_created)",
+			 (drawer_id, requested_by, assigned_admin_id, request_data, proof_data, base_date_updated, status, date_created)
+			 VALUES (:drawer_id, :requested_by, :assigned_admin_id, :request_data, :proof_data, :base_date_updated, 'pending', :date_created)",
 			[
 				'drawer_id' => (int)$row->id,
 				'requested_by' => (int)($session->id ?? 0),
+				'assigned_admin_id' => $assignedAdminId,
 				'request_data' => $requestDataJson,
 				'proof_data' => $proofDataJson,
 				'base_date_updated' => !empty($row->date_updated) && $row->date_updated !== '0000-00-00 00:00:00' ? $row->date_updated : null,
@@ -287,13 +305,24 @@ if ($isOpsManager && !user_can('is_admin') && $approvedEdit === null) {
 		set_value('errors', array_merge($cashdrawer->errors, $req->upload_errors));
 		return;
 	}
-	message_success('Cashdrawer edit submitted for administrator approval. The changes are not active yet.');
+	$notification = operations_account_notify_cashdrawer_edit_approval_admin(
+		(int)$db->insert_id,
+		(int)$row->id,
+		(int)($session->id ?? 0),
+		$assignedAdminId
+	);
+	if ((int)($notification['sent'] ?? 0) > 0) {
+		message_success('Cashdrawer edit submitted and assigned to administrator #' . $assignedAdminId . ' for approval. WhatsApp notification sent.');
+	} else {
+		message_success('Cashdrawer edit submitted and assigned to administrator #' . $assignedAdminId . '. The changes are pending approval and are not active yet.');
+		message_fail('WhatsApp notification to the assigned administrator could not be delivered. The request remains visible in the cashdrawer list.');
+	}
 	redirect('admin/operations_accounts');
 }
 
 // Persist CFA rates to settings if operations manager posted them
 try {
-	if ($isOpsManager || $approvedEdit !== null) {
+	if ($approvedEdit !== null || !$isOpsManager || user_can('is_admin')) {
 		$buyingRatePost  = isset($postdata['buying_rate'])  ? (float)$postdata['buying_rate']  : null;
 		$sellingRatePost = isset($postdata['selling_rate']) ? (float)$postdata['selling_rate'] : null;
 		if ($buyingRatePost !== null || $sellingRatePost !== null) {

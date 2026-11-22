@@ -91,12 +91,21 @@
         $opsFormatCashdrawerMeta = static function($row) {
             $updatedBy = trim(($row->updated_by_first_name ?? '') . ' ' . ($row->updated_by_last_name ?? ''));
             $hasUpdatedDate = !empty($row->date_updated) && $row->date_updated !== '0000-00-00 00:00:00';
+            if ($hasUpdatedDate && $updatedBy === '' && (int)($row->updated_by ?? 0) > 0) {
+                $updatedBy = 'User #' . (int)$row->updated_by;
+            }
+            $pendingEditRequestedBy = trim((string)($row->pending_edit_requested_by ?? ''));
+            if ($pendingEditRequestedBy === '' && (int)($row->pending_edit_requested_by_id ?? 0) > 0) {
+                $pendingEditRequestedBy = 'User #' . (int)$row->pending_edit_requested_by_id;
+            }
 
             return [
                 'created' => !empty($row->date_created) ? get_date($row->date_created) : '--',
                 'has_updated' => $hasUpdatedDate,
                 'updated' => $hasUpdatedDate ? get_date_time($row->date_updated) : '',
                 'updated_by' => ($hasUpdatedDate && $updatedBy !== '') ? $updatedBy : '',
+                'pending_edit_requested_at' => !empty($row->pending_edit_requested_at) ? get_date_time($row->pending_edit_requested_at) : '',
+                'pending_edit_requested_by' => $pendingEditRequestedBy,
             ];
         };
     ?>
@@ -134,15 +143,15 @@
     </div>
 
     <div class="row my-3 mx-auto align-items-end ops-cashdrawer-toolbar">
-        <div class="col-md-3 mb-2 ops-cashdrawer-filter">
+        <div class="col-md-3 col-lg-2 mb-2 ops-cashdrawer-filter">
             <label class="form-label small text-muted">From date</label>
             <input type="date" class="form-control form-control-sm" data-role="ops-date-from" value="<?=htmlspecialchars($_GET['date_from'] ?? '')?>">
         </div>
-        <div class="col-md-3 mb-2 ops-cashdrawer-filter">
+        <div class="col-md-3 col-lg-2 mb-2 ops-cashdrawer-filter">
             <label class="form-label small text-muted">To date</label>
             <input type="date" class="form-control form-control-sm" data-role="ops-date-to" value="<?=htmlspecialchars($_GET['date_to'] ?? '')?>">
         </div>
-        <div class="col-md-3 mb-2 ops-cashdrawer-filter ops-cashdrawer-search">
+        <div class="col-md-3 col-lg-3 mb-2 ops-cashdrawer-filter ops-cashdrawer-search">
             <label class="form-label small text-muted" for="opsUserFilter">User</label>
             <?php
                 $selectedUserIds = [];
@@ -166,20 +175,23 @@
                 <?php endforeach; ?>
             </select>
         </div>
-        <div class="col-md-3 mb-2 d-flex justify-content-end gap-2 align-items-end ops-cashdrawer-actions">
-            <?php if(user_can('add_wallet')):?>
-            <a style="text-decoration: none;" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/add_cashdrawer">
-                <button class="btn btn-warning btn-sm">
-                    <i class="fa-solid fa-plus"></i> New Cashdrawer
-                </button>
-            </a>
-            <?php endif?>
-            <?php if(user_can('is_admin')): ?>
-            <a class="btn btn-outline-primary btn-sm" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/cashdrawer_edit_approvals">
-                <i class="fa-solid fa-clipboard-check"></i> Edit approvals
-            </a>
-            <?php endif; ?>
-            <select class="form-select form-select-sm w-auto ms-2" data-role="ops-page-size">
+        <div class="col-md-3 col-lg-5 mb-2 ops-cashdrawer-actions">
+            <div class="ops-cashdrawer-primary-actions">
+                <?php if(user_can('add_wallet')):?>
+                    <a class="btn btn-primary btn-sm" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/add_cashdrawer">
+                        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i> New Cashdrawer
+                    </a>
+                <?php endif?>
+                <?php if(user_can('is_admin')): ?>
+                    <a class="btn btn-outline-secondary btn-sm" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/cashdrawer_edit_approvals">
+                        <i class="fa-solid fa-clipboard-check me-1" aria-hidden="true"></i> Edit approvals
+                        <?php if (!empty($cashdrawerEditPendingCount)): ?>
+                            <span class="ops-cashdrawer-approval-count"><?= (int)$cashdrawerEditPendingCount ?></span>
+                        <?php endif; ?>
+                    </a>
+                <?php endif; ?>
+            </div>
+            <select class="form-select form-select-sm" data-role="ops-page-size" aria-label="Cashdrawer rows per page">
                 <?php $pageLimit = isset($pager) ? (int)$pager->limit : 10; ?>
                 <option value="5"  <?=$pageLimit == 5  ? 'selected' : ''?>>5</option>
                 <option value="10" <?=$pageLimit == 10 ? 'selected' : ''?>>10</option>
@@ -187,6 +199,9 @@
                 <option value="50" <?=$pageLimit == 50 ? 'selected' : ''?>>50</option>
             </select>
         </div>
+        <?php if (!empty($cashdrawerEditApprovalListError) && user_can('is_admin')): ?>
+            <div class="alert alert-warning py-2" role="status"><?= esc($cashdrawerEditApprovalListError) ?></div>
+        <?php endif; ?>
     </div>
 
     <div class="table-responsive ops-cashdrawer-table-wrap" style="width:100%; max-width:100%;">
@@ -197,7 +212,7 @@
                     <th class="bg-secondary text-warning">ID</th>
                     <th class="bg-secondary text-warning d-none d-lg-table-cell">Agent</th>
                     <th class="bg-secondary text-warning">Balances</th>
-                    <th class="bg-secondary text-warning ops-cashdrawer-date-col d-none d-lg-table-cell">Date</th>
+                    <th class="bg-secondary text-warning ops-cashdrawer-date-col d-none d-lg-table-cell">Created / updated</th>
                     <th class="bg-secondary text-warning"></th>
                 </tr>
             </thead>
@@ -210,6 +225,24 @@
                         <td>
                             <a style="text-decoration: none;" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/view_cashdrawer/<?=$row->id?>"><?=$row->id?>
                             </a>
+                            <?php if (!empty($row->pending_edit_approval_id)): ?>
+                                <div class="mt-1">
+                                    <?php if (user_can('is_admin')): ?>
+                                        <a class="ops-cashdrawer-pending-badge" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/cashdrawer_edit_approvals?request_id=<?=(int)$row->pending_edit_approval_id?>">
+                                            <i class="fa-solid fa-clock" aria-hidden="true"></i>Pending approval
+                                        </a>
+                                    <?php else: ?>
+                                        <span class="ops-cashdrawer-pending-badge">
+                                            <i class="fa-solid fa-clock" aria-hidden="true"></i>Pending admin approval
+                                        </span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($row->pending_edit_approval_admin)): ?>
+                                        <div class="small text-muted mt-1">Assigned to <?= esc($row->pending_edit_approval_admin) ?></div>
+                                    <?php endif; ?>
+                                </div>
+                            <?php elseif (!operations_account_is_current_cashdrawer($row)): ?>
+                                <div class="mt-1"><span class="badge rounded-pill bg-secondary">Historical · read-only</span></div>
+                            <?php endif; ?>
                             <div class="ops-cashdrawer-mobile-meta d-lg-none">
                                 <div>
                                     <strong>Agent:</strong>
@@ -220,7 +253,13 @@
                                 <?php if ($opsMeta['has_updated']): ?>
                                     <div class="text-muted"><strong>Updated:</strong> <?=$opsMeta['updated']?></div>
                                     <?php if ($opsMeta['updated_by'] !== ''): ?>
-                                        <div class="text-muted"><strong>By:</strong> <?=htmlspecialchars($opsMeta['updated_by'])?></div>
+                                        <div class="text-muted"><strong>Updated by:</strong> <?=esc($opsMeta['updated_by'])?></div>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                                <?php if ($opsMeta['pending_edit_requested_at'] !== ''): ?>
+                                    <div class="text-warning"><strong>Pending edit:</strong> <?=esc($opsMeta['pending_edit_requested_at'])?></div>
+                                    <?php if ($opsMeta['pending_edit_requested_by'] !== ''): ?>
+                                        <div class="text-muted"><strong>Requested by:</strong> <?=esc($opsMeta['pending_edit_requested_by'])?></div>
                                     <?php endif; ?>
                                 <?php endif; ?>
                             </div>
@@ -268,7 +307,13 @@
                                 <?php if ($opsMeta['has_updated']): ?>
                                     <div class="small text-muted"><strong>Updated:</strong> <?=$opsMeta['updated']?></div>
                                     <?php if ($opsMeta['updated_by'] !== ''): ?>
-                                        <div class="small text-muted"><strong>By:</strong> <?=htmlspecialchars($opsMeta['updated_by'])?></div>
+                                        <div class="small text-muted"><strong>Updated by:</strong> <?=esc($opsMeta['updated_by'])?></div>
+                                    <?php endif; ?>
+                                <?php endif; ?>
+                                <?php if ($opsMeta['pending_edit_requested_at'] !== ''): ?>
+                                    <div class="small text-warning"><strong>Pending edit:</strong> <?=esc($opsMeta['pending_edit_requested_at'])?></div>
+                                    <?php if ($opsMeta['pending_edit_requested_by'] !== ''): ?>
+                                        <div class="small text-muted"><strong>Requested by:</strong> <?=esc($opsMeta['pending_edit_requested_by'])?></div>
                                     <?php endif; ?>
                                 <?php endif; ?>
                             </div>
@@ -293,20 +338,20 @@
                                             </a>
                                         </li>
                                     <?php endif?>
-                                    <?php if(user_can("edit_wallet") || $user_id === $row->user_id):?>
+                                    <?php if((user_can("edit_wallet") || $user_id === $row->user_id) && operations_account_is_current_cashdrawer($row)):?>
                                         <li>
                                             <a class="dropdown-item" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/edit_cashdrawer/<?=$row->id?>">
                                                 <i class="fa fa-pen text-warning"></i> <?=!empty($row->has_repair_issue) ? 'Repair Cashdrawer' : 'Edit Cashdrawer'?>
                                             </a>
                                         </li>
                                     <?php endif;?>
-                                    <?php if(user_can("delete_wallet") || $user_id === $row->id):?>
+                                    <?php if(user_can('is_admin') && !empty($row->pending_edit_approval_id)): ?>
                                         <li>
-                                            <a class="dropdown-item" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/delete_cashdrawer/<?=$row->id?>">
-                                                <i class="fa fa-trash text-warning"></i> <?=!empty($row->has_repair_issue) ? 'Delete / Rebuild' : 'Delete'?>
+                                            <a class="dropdown-item text-warning fw-semibold" href="<?=ROOT?>/<?=$admin_route?>/<?=$plugin_route?>/cashdrawer_edit_approvals?request_id=<?=(int)$row->pending_edit_approval_id?>">
+                                                <i class="fa-solid fa-clipboard-check me-1"></i>Review pending edit
                                             </a>
                                         </li>
-                                    <?php endif;?>
+                                    <?php endif; ?>
                                 </ul>
                             </div>
                         </td>

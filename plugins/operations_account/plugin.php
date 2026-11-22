@@ -282,6 +282,27 @@ if(!function_exists('operations_account_has_opened_or_owned_cashdrawer_today')){
 	}
 }
 
+if (!function_exists('operations_account_is_current_cashdrawer')) {
+	function operations_account_is_current_cashdrawer($drawer): bool
+	{
+		$dateCreated = is_array($drawer)
+			? trim((string)($drawer['date_created'] ?? ''))
+			: trim((string)($drawer->date_created ?? ''));
+		if ($dateCreated === '' || strpos($dateCreated, '0000-00-00') === 0) {
+			return false;
+		}
+
+		try {
+			$timezone = new \DateTimeZone('Africa/Accra');
+			$createdDate = new \DateTimeImmutable($dateCreated, $timezone);
+			$currentDate = new \DateTimeImmutable('now', $timezone);
+			return $createdDate->format('Y-m-d') === $currentDate->format('Y-m-d');
+		} catch (\Throwable $e) {
+			return false;
+		}
+	}
+}
+
 if(!function_exists('operations_account_cashdrawer_vault_limits')){
 	function operations_account_cashdrawer_vault_limits(int $userId): array
 	{
@@ -794,29 +815,29 @@ if(!function_exists('operations_account_render_cashdrawer_edit_history_entry')){
 		$summaryRows = is_array($parsed['summary'] ?? null) ? $parsed['summary'] : [];
 		$denominationChanges = is_array($parsed['denomination_changes'] ?? null) ? $parsed['denomination_changes'] : [];
 
-		$html = "<div class='transaction-item mb-2' style='padding:10px; border:1px solid var(--bs-border-color); border-radius:8px;'>";
+		$html = "<div class='transaction-item mb-2 cashdrawer-edit-history-entry' style='padding:10px; border:1px solid var(--bs-border-color); border-radius:8px;'>";
 		$html .= "<div style='display:flex; justify-content:space-between; align-items:center; gap:10px;'>";
 		$html .= "<span class='transaction-status status-exchange'>Edited</span>";
-		$html .= "<span style='font-size:12px; color:var(--text-secondary);'>" . $dateCreated . "</span>";
+		$html .= "<span class='cashdrawer-edit-history-date'>" . $dateCreated . "</span>";
 		$html .= "</div>";
 
 		if ($actor !== '') {
-			$html .= "<div style='margin-top:6px; font-size:13px; font-weight:600;'>" . esc($actor) . " updated this drawer</div>";
+			$html .= "<div class='cashdrawer-edit-history-actor'>" . esc($actor) . " updated this drawer</div>";
 		}
 
 		if (empty($summaryRows) && empty($denominationChanges)) {
-			$html .= "<div style='margin-top:6px; font-size:13px;'>" . esc((string)($parsed['raw'] ?? '')) . "</div>";
+			$html .= "<div class='cashdrawer-edit-history-summary'>" . esc((string)($parsed['raw'] ?? '')) . "</div>";
 			$html .= "</div>";
 			return $html;
 		}
 
 		if (!empty($summaryRows)) {
-			$html .= "<div style='margin-top:8px; display:grid; gap:4px;'>";
+			$html .= "<div class='cashdrawer-edit-history-summary'>";
 			foreach ($summaryRows as $summaryRow) {
 				$label = esc((string)($summaryRow['label'] ?? 'Change'));
 				$old = esc((string)($summaryRow['old'] ?? ''));
 				$new = esc((string)($summaryRow['new'] ?? ''));
-				$html .= "<div style='font-size:13px;'><strong>{$label}:</strong> {$old} -> {$new}</div>";
+				$html .= "<div><strong>{$label}:</strong> {$old} -> {$new}</div>";
 			}
 			$html .= "</div>";
 		}
@@ -832,10 +853,10 @@ if(!function_exists('operations_account_render_cashdrawer_edit_history_entry')){
 			}
 			foreach ($changesByCurrency as $currencyKey => $currencyRows) {
 				$title = $currencyKey === 'CFA' ? 'CFA denomination changes' : 'Cash denomination changes';
-				$html .= "<div style='margin-top:10px;'>";
-				$html .= "<div style='font-size:12px; font-weight:600; margin-bottom:6px;'>" . esc($title) . "</div>";
+				$html .= "<div class='cashdrawer-edit-history-denominations'>";
+				$html .= "<div class='cashdrawer-edit-history-denomination-title'>" . esc($title) . "</div>";
 				$html .= "<div style='overflow:auto;'>";
-				$html .= "<table class='table table-sm mb-0'><thead><tr><th>Denomination</th><th>Prev Count</th><th>Prev Volume</th><th>New Count</th><th>New Volume</th></tr></thead><tbody>";
+				$html .= "<table class='table table-sm mb-0 cashdrawer-edit-history-table'><thead><tr><th>Denomination</th><th>Prev Count</th><th>Prev Volume</th><th>New Count</th><th>New Volume</th></tr></thead><tbody>";
 				foreach ($currencyRows as $changeRow) {
 					$label = esc((string)($changeRow['label'] ?? ''));
 					$oldCount = number_format((int)($changeRow['old_count'] ?? 0));
@@ -2069,6 +2090,8 @@ if(!function_exists('operations_account_collect_cashdrawer_dependencies')){
 if(!function_exists('operations_account_delete_cashdrawer_and_links')){
 	function operations_account_delete_cashdrawer_and_links(int|object $drawer, array $selectedDirectRecords = []): array
 	{
+		throw new \RuntimeException('Cashdrawer deletion is disabled.');
+
 		$row = is_object($drawer) ? $drawer : operations_account_get_cashdrawer_row((int)$drawer);
 		if(empty($row) || empty($row->id)){
 			throw new \RuntimeException('Cashdrawer not found.');
@@ -3562,6 +3585,60 @@ add_action('controller', function(){
 		";
 
 		$cashdrawers = $sim->query($query, $params);
+		$cashdrawerEditPendingCount = 0;
+		$cashdrawerEditApprovalListError = '';
+		if ((int)$user_id > 0) {
+			try {
+				$approvalDb = new \Core\Database;
+				operations_account_ensure_cashdrawer_edit_approval_schema($approvalDb);
+				operations_account_expire_old_cashdrawer_edit_approvals($approvalDb);
+				$approvalVisibility = user_can('is_admin')
+					? '(r.assigned_admin_id = :admin_id OR r.assigned_admin_id IS NULL OR r.assigned_admin_id = 0)'
+					: 'r.requested_by = :requester_id';
+				$approvalParams = user_can('is_admin')
+					? ['admin_id' => (int)$user_id]
+					: ['requester_id' => (int)$user_id];
+				$pendingApprovals = $approvalDb->query(
+					"SELECT r.id, r.drawer_id, r.requested_by, r.assigned_admin_id, r.date_created AS pending_edit_requested_at,
+					        TRIM(CONCAT_WS(' ', NULLIF(assigned.first_name, ''), NULLIF(assigned.last_name, ''))) AS assigned_admin_name,
+					        TRIM(CONCAT_WS(' ', NULLIF(requester.first_name, ''), NULLIF(requester.last_name, ''))) AS pending_edit_requested_by
+					 FROM cashdrawer_edit_approval_requests r
+					 LEFT JOIN users assigned ON assigned.id = r.assigned_admin_id
+					 LEFT JOIN users requester ON requester.id = r.requested_by
+					 WHERE r.status IN ('pending', 'processing') AND {$approvalVisibility}
+					 ORDER BY r.date_created ASC, r.id ASC",
+					$approvalParams
+				) ?: [];
+				if ($approvalDb->has_error) {
+					throw new \RuntimeException((string)$approvalDb->error);
+				}
+				$pendingApprovalByDrawer = [];
+				foreach ($pendingApprovals as $pendingApproval) {
+					$pendingDrawerId = (int)($pendingApproval->drawer_id ?? 0);
+					if ($pendingDrawerId > 0) {
+						$pendingApprovalByDrawer[$pendingDrawerId] = [
+							'id' => (int)($pendingApproval->id ?? 0),
+							'assigned_admin_name' => trim((string)($pendingApproval->assigned_admin_name ?? '')),
+							'requested_at' => trim((string)($pendingApproval->pending_edit_requested_at ?? '')),
+							'requested_by' => trim((string)($pendingApproval->pending_edit_requested_by ?? '')),
+							'requested_by_id' => (int)($pendingApproval->requested_by ?? 0),
+						];
+					}
+				}
+				$cashdrawerEditPendingCount = count($pendingApprovals);
+				foreach ((array)$cashdrawers as $drawerRow) {
+					$pendingInfo = $pendingApprovalByDrawer[(int)($drawerRow->id ?? 0)] ?? [];
+					$drawerRow->pending_edit_approval_id = (int)($pendingInfo['id'] ?? 0);
+					$drawerRow->pending_edit_approval_admin = (string)($pendingInfo['assigned_admin_name'] ?? '');
+					$drawerRow->pending_edit_requested_at = (string)($pendingInfo['requested_at'] ?? '');
+					$drawerRow->pending_edit_requested_by = (string)($pendingInfo['requested_by'] ?? '');
+					$drawerRow->pending_edit_requested_by_id = (int)($pendingInfo['requested_by_id'] ?? 0);
+				}
+			} catch (\Throwable $e) {
+				error_log('[CashdrawerEditApproval] Unable to load pending drawer indicators: ' . $e->getMessage());
+				$cashdrawerEditApprovalListError = 'Pending approval indicators are temporarily unavailable.';
+			}
+		}
 		if (!empty($cashdrawers)) {
 			foreach ($cashdrawers as $drawerRow) {
 				$drawerRow->header_amount = (float)($drawerRow->amount ?? 0);
@@ -4106,13 +4183,25 @@ add_action('basic-admin_main_content',function(){
 			try {
 				$approvalDb = new \Core\Database;
 				operations_account_ensure_cashdrawer_edit_approval_schema($approvalDb);
+				operations_account_expire_old_cashdrawer_edit_approvals($approvalDb);
 				$cashdrawerEditRequests = $approvalDb->query(
-					"SELECT r.*, TRIM(CONCAT_WS(' ', NULLIF(u.first_name, ''), NULLIF(u.last_name, ''))) AS requester_name
+					"SELECT r.*,
+					        TRIM(CONCAT_WS(' ', NULLIF(u.first_name, ''), NULLIF(u.last_name, ''))) AS requester_name,
+					        TRIM(CONCAT_WS(' ', NULLIF(assigned.first_name, ''), NULLIF(assigned.last_name, ''))) AS assigned_admin_name
 					 FROM cashdrawer_edit_approval_requests r
 					 LEFT JOIN users u ON u.id = r.requested_by
+					 LEFT JOIN users assigned ON assigned.id = r.assigned_admin_id
 					 WHERE r.status IN ('pending', 'processing')
-					 ORDER BY r.date_created ASC, r.id ASC"
+					   AND (r.assigned_admin_id = :admin_id OR r.assigned_admin_id IS NULL OR r.assigned_admin_id = 0)
+					 ORDER BY r.date_created ASC, r.id ASC",
+					['admin_id' => (int)($session->id ?? 0)]
 				) ?: [];
+				foreach ($cashdrawerEditRequests as $approvalRequest) {
+					$approvalRequest->current_values = operations_account_cashdrawer_approval_current_values(
+						$approvalDb,
+						(int)($approvalRequest->drawer_id ?? 0)
+					);
+				}
 			} catch (\Throwable $e) {
 				error_log('[CashdrawerEditApproval] Unable to load pending requests: ' . $e->getMessage());
 				$cashdrawerEditRequests = [];
@@ -4157,21 +4246,33 @@ add_action('basic-admin_main_content',function(){
 			// Load global settings so edit cashdrawer page can access CFA buying/selling rates
 			$settings = null;
 			try{
-				$settingsModel = new \Settings\Setting;
-				$settings = $settingsModel->first(['id' => 1]);
+				$settingsDb = new \Core\Database;
+				$settingsRows = $settingsDb->query(
+					"SELECT buying_rate, selling_rate FROM settings ORDER BY id DESC LIMIT 1"
+				) ?: [];
+				if ($settingsDb->has_error) {
+					throw new \RuntimeException('Unable to load current CFA rates: ' . (string)$settingsDb->error);
+				}
+				$settings = $settingsRows[0] ?? null;
 			}catch(\Throwable $e){
+				error_log('[CashdrawerEdit] Unable to load current CFA rates: ' . $e->getMessage());
 				$settings = null;
 			}
 			$cashdrawer = new \MyWallets\Cashdrawer;
 			$row = $cashdrawer->first(['id' => $id]);
-			require plugin_path('views/admin/cashdrawers/edit.php');
+			if (empty($row)) {
+				message_fail('Cashdrawer not found.');
+				redirect($admin_route . '/' . $plugin_route);
+			} elseif (!operations_account_is_current_cashdrawer($row)) {
+				message_fail("Only the current day's cashdrawer can be edited. Historical cashdrawers are read-only.");
+				redirect($admin_route . '/' . $plugin_route . '/view_cashdrawer/' . (int)$row->id);
+			} else {
+				require plugin_path('views/admin/cashdrawers/edit.php');
+			}
 		}else
 		if(URL(2) == 'delete_cashdrawer'){
-			$cashdrawer = new \MyWallets\Cashdrawer;
-			$row = operations_account_get_cashdrawer_row((int)$id);
-			$cashdrawer_issue_report = !empty($row) ? operations_account_cashdrawer_issue_report($row) : ['issue_count' => 0, 'issues' => []];
-			$cashdrawer_dependencies = !empty($row) ? operations_account_collect_cashdrawer_dependencies($row) : ['direct_records' => [], 'ledger_refs' => []];
-			require plugin_path('views/admin/cashdrawers/delete.php');
+			message_fail('Cashdrawer deletion is disabled.');
+			redirect($admin_route . '/' . $plugin_route);
 		}else
 		if(URL(2) == 'transfer'){
 			require plugin_path('views/admin/transfer.php');

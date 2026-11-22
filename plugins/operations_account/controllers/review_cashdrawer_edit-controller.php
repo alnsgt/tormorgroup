@@ -30,6 +30,12 @@ try {
 		message_fail('This cashdrawer edit request is no longer pending.');
 		redirect($admin_route . '/' . $plugin_route . '/cashdrawer_edit_approvals');
 	}
+	$reviewerId = (int)(get_session()->id ?? 0);
+	$assignedAdminId = (int)($approvalRequest->assigned_admin_id ?? 0);
+	if ($assignedAdminId > 0 && $assignedAdminId !== $reviewerId) {
+		message_fail('This cashdrawer edit is assigned to another administrator.');
+		redirect($admin_route . '/' . $plugin_route . '/cashdrawer_edit_approvals');
+	}
 
 	if ($decision === 'reject') {
 		$db->query(
@@ -38,7 +44,7 @@ try {
 			     review_note = :review_note
 			 WHERE id = :id AND status = 'pending'",
 			[
-				'reviewed_by' => (int)(get_session()->id ?? 0),
+				'reviewed_by' => $reviewerId,
 				'reviewed_at' => date('Y-m-d H:i:s'),
 				'review_note' => trim((string)($reviewPost['review_note'] ?? '')) ?: 'Rejected by administrator.',
 				'id' => $requestId,
@@ -68,12 +74,30 @@ try {
 	}
 
 	$drawerRows = $db->query(
-		"SELECT id, date_updated FROM cashdrawers WHERE id = :id LIMIT 1",
+		"SELECT id, date_created, date_updated FROM cashdrawers WHERE id = :id LIMIT 1",
 		['id' => $drawerId]
 	) ?: [];
 	$drawerRow = $drawerRows[0] ?? null;
 	if (!$drawerRow) {
 		message_fail('The cashdrawer no longer exists. The request was not applied.');
+		redirect($admin_route . '/' . $plugin_route . '/cashdrawer_edit_approvals');
+	}
+	if (!operations_account_is_current_cashdrawer($drawerRow)) {
+		$db->query(
+			"UPDATE cashdrawer_edit_approval_requests
+			 SET status = 'expired', reviewed_by = :reviewed_by, reviewed_at = :reviewed_at,
+			     review_note = 'Expired because only current-day cashdrawers can be edited.'
+			 WHERE id = :id AND status = 'pending'",
+			[
+				'reviewed_by' => $reviewerId,
+				'reviewed_at' => date('Y-m-d H:i:s'),
+				'id' => $requestId,
+			]
+		);
+		if ($db->has_error) {
+			throw new \RuntimeException('Unable to expire the outdated cashdrawer edit request: ' . (string)$db->error);
+		}
+		message_fail("This request expired because only the current day's cashdrawer can be edited.");
 		redirect($admin_route . '/' . $plugin_route . '/cashdrawer_edit_approvals');
 	}
 
@@ -95,7 +119,7 @@ try {
 		 SET status = 'processing', reviewed_by = :reviewed_by, reviewed_at = :reviewed_at
 		 WHERE id = :id AND status = 'pending'",
 		[
-			'reviewed_by' => (int)(get_session()->id ?? 0),
+			'reviewed_by' => $reviewerId,
 			'reviewed_at' => date('Y-m-d H:i:s'),
 			'id' => $requestId,
 		]
