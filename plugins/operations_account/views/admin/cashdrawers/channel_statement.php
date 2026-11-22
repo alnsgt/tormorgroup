@@ -42,17 +42,12 @@ $entries = array_values(array_filter($allEntries, static function ($entry) use (
 $openingTotal = 0.0;
 $creditTotal = 0.0;
 $debitTotal = 0.0;
-$latestBalancesByDrawer = [];
 foreach ($entries as $entry) {
 	$openingTotal += (float)($entry['opening'] ?? 0);
 	$creditTotal += (float)($entry['credit'] ?? 0);
 	$debitTotal += (float)($entry['debit'] ?? 0);
-	$entryDrawerId = (int)($entry['drawer_id'] ?? 0);
-	if (!array_key_exists($entryDrawerId, $latestBalancesByDrawer)) {
-		$latestBalancesByDrawer[$entryDrawerId] = (float)($entry['balance_after'] ?? 0);
-	}
 }
-$closingTotal = array_sum($latestBalancesByDrawer);
+$closingTotal = $entries ? (float)($entries[0]['balance_after'] ?? 0) : 0.0;
 $formatDate = static function ($value): string {
 	$value = trim((string)$value);
 	if ($value === '') {
@@ -384,6 +379,9 @@ $statementQuery = http_build_query($statementQueryParams);
 		</div>
 	<?php endif; ?>
 
+	<p class="channel-statement-filter-note">
+		Opening snapshots show the prior matching drawer’s closing balance under “Balance before” and this drawer’s opening under “Balance after.” The first recorded drawer starts from zero; any difference remains visible.
+	</p>
 	<div class="channel-statement-ledger-heading">
 		<h3><i class="fa fa-list-ul me-1" aria-hidden="true"></i> Movement ledger</h3>
 		<span class="channel-statement-count"><?= number_format(count($entries)) ?> record<?= count($entries) === 1 ? '' : 's' ?></span>

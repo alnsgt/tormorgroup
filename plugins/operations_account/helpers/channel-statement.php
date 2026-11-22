@@ -163,6 +163,7 @@ if (!function_exists('operations_account_get_channel_statement')) {
 				$movementsByDrawer[$drawerIdForMovement][] = [
 					'date' => (string)($record->date_created ?? ''),
 					'drawer_id' => $drawerIdForMovement,
+					'_owner_id' => (int)($record->user_id ?? 0),
 					'_sort_id' => (int)($record->id ?? 0),
 					'reference' => !empty($record->trans_id) ? (string)$record->trans_id : '',
 					'status' => trim((string)($record->trans_status ?? '')) ?: 'Recorded',
@@ -179,11 +180,26 @@ if (!function_exists('operations_account_get_channel_statement')) {
 				];
 			}
 
-			foreach ($balanceRowsByDrawer as $balanceDrawerId => $record) {
+			$orderedBalanceRows = array_values($balanceRowsByDrawer);
+			usort($orderedBalanceRows, static function ($a, $b): int {
+				$dateOrder = strcmp((string)($a->drawer_date ?? ''), (string)($b->drawer_date ?? ''));
+				if ($dateOrder !== 0) {
+					return $dateOrder;
+				}
+				$ownerOrder = (int)($a->user_id ?? 0) <=> (int)($b->user_id ?? 0);
+				return $ownerOrder !== 0
+					? $ownerOrder
+					: ((int)($a->drawer_id ?? 0) <=> (int)($b->drawer_id ?? 0));
+			});
+			$previousClosingByOwner = [];
+			foreach ($orderedBalanceRows as $record) {
+				$balanceDrawerId = (int)($record->drawer_id ?? 0);
+				$balanceOwnerId = (int)($record->user_id ?? 0);
 				$opening = (float)($record->opening_balance ?? 0);
 				$credit = (float)($record->credit ?? 0);
 				$debit = (float)($record->debit ?? 0);
 				$closing = (float)($record->closing_balance ?? ($opening + $credit - $debit));
+				$previousClosing = (float)($previousClosingByOwner[$balanceOwnerId] ?? 0);
 				$drawerMovements = $movementsByDrawer[$balanceDrawerId] ?? [];
 				if ($drawerMovements) {
 					$firstMovementBalance = (float)$drawerMovements[0]['balance_before'];
@@ -199,6 +215,7 @@ if (!function_exists('operations_account_get_channel_statement')) {
 					$entries[] = [
 						'date' => (string)($record->drawer_date ?? $record->movement_date ?? ''),
 						'drawer_id' => $balanceDrawerId,
+						'_owner_id' => $balanceOwnerId,
 						'reference' => '',
 						'status' => 'Opening snapshot',
 						'actor' => '',
@@ -209,13 +226,14 @@ if (!function_exists('operations_account_get_channel_statement')) {
 						'opening' => $opening,
 						'credit' => 0.0,
 						'debit' => 0.0,
-						'balance_before' => 0.0,
+						'balance_before' => $previousClosing,
 						'balance_after' => $opening,
 					];
 					if ($historicalCredit + $historicalDebit > 0.00001) {
 						$entries[] = [
 							'date' => (string)($drawerMovements[0]['date'] ?? $record->drawer_date ?? ''),
 							'drawer_id' => $balanceDrawerId,
+							'_owner_id' => $balanceOwnerId,
 							'reference' => '',
 							'status' => 'Historical summary',
 							'actor' => '',
@@ -231,32 +249,37 @@ if (!function_exists('operations_account_get_channel_statement')) {
 						];
 					}
 					array_push($entries, ...$drawerMovements);
+					$previousClosingByOwner[$balanceOwnerId] = $closing;
 					continue;
 				}
 
+				$entries[] = [
+					'date' => (string)($record->drawer_date ?? $record->movement_date ?? ''),
+					'drawer_id' => $balanceDrawerId,
+					'_owner_id' => $balanceOwnerId,
+					'reference' => '',
+					'status' => 'Opening snapshot',
+					'actor' => '',
+					'description' => 'Opening balance snapshot',
+					'denomination' => '',
+					'denominations' => [],
+					'count' => '',
+					'opening' => $opening,
+					'credit' => 0.0,
+					'debit' => 0.0,
+					'balance_before' => $previousClosing,
+					'balance_after' => $opening,
+				];
+
 				if (abs($closing - $opening) < 0.00001 && $credit + $debit < 0.00001) {
-					$entries[] = [
-						'date' => (string)($record->drawer_date ?? $record->movement_date ?? ''),
-						'drawer_id' => $balanceDrawerId,
-						'reference' => '',
-						'status' => 'Opening snapshot',
-						'actor' => '',
-						'description' => 'Opening balance snapshot',
-						'denomination' => '',
-						'denominations' => [],
-						'count' => '',
-						'opening' => $opening,
-						'credit' => 0.0,
-						'debit' => 0.0,
-						'balance_before' => 0.0,
-						'balance_after' => $opening,
-					];
+					$previousClosingByOwner[$balanceOwnerId] = $closing;
 					continue;
 				}
 
 				$entries[] = [
 					'date' => (string)($record->movement_date ?? $record->drawer_date ?? ''),
 					'drawer_id' => $balanceDrawerId,
+					'_owner_id' => $balanceOwnerId,
 					'reference' => '',
 					'detail_reference' => !empty($record->trans_id) ? (string)$record->trans_id : '',
 					'detail_context' => 'Latest linked transaction',
@@ -266,12 +289,13 @@ if (!function_exists('operations_account_get_channel_statement')) {
 					'denomination' => '',
 					'denominations' => [],
 					'count' => '',
-					'opening' => $opening,
+					'opening' => 0.0,
 					'credit' => $credit,
 					'debit' => $debit,
-					'balance_before' => 0.0,
+					'balance_before' => $opening,
 					'balance_after' => $closing,
 				];
+				$previousClosingByOwner[$balanceOwnerId] = $closing;
 			}
 			foreach ($movementsByDrawer as $balanceDrawerId => $drawerMovements) {
 				if (!isset($balanceRowsByDrawer[$balanceDrawerId])) {
@@ -330,6 +354,7 @@ if (!function_exists('operations_account_get_channel_statement')) {
 						$cashMovements[$movementKey] = [
 							'date' => (string)($record->date_created ?? $record->drawer_date ?? ''),
 							'drawer_id' => $drawerIdForMovement,
+							'_owner_id' => (int)($record->user_id ?? 0),
 							'_sort_id' => (int)($record->id ?? 0),
 							'reference' => !$isOpening && $transId > 0 ? (string)$transId : '',
 							'status' => $status,
@@ -394,13 +419,22 @@ if (!function_exists('operations_account_get_channel_statement')) {
 					: ((int)($a['_sort_id'] ?? 0) <=> (int)($b['_sort_id'] ?? 0));
 			});
 			$runningBalancesByDrawer = [];
+			$runningBalancesByOwner = [];
 			foreach ($entries as &$entry) {
 				$entryDrawerId = (int)$entry['drawer_id'];
-				$runningBalance = $runningBalancesByDrawer[$entryDrawerId] ?? 0.0;
+				$entryOwnerId = (int)($entry['_owner_id'] ?? $ownerId);
+				$runningBalance = $runningBalancesByDrawer[$entryDrawerId]
+					?? $runningBalancesByOwner[$entryOwnerId]
+					?? 0.0;
 				$entry['balance_before'] = $runningBalance;
-				$runningBalance += (float)$entry['opening'] + (float)$entry['credit'] - (float)$entry['debit'];
+				if (stripos((string)($entry['status'] ?? ''), 'opening') !== false) {
+					$runningBalance = (float)$entry['opening'];
+				} else {
+					$runningBalance += (float)$entry['credit'] - (float)$entry['debit'];
+				}
 				$entry['balance_after'] = $runningBalance;
 				$runningBalancesByDrawer[$entryDrawerId] = $runningBalance;
+				$runningBalancesByOwner[$entryOwnerId] = $runningBalance;
 			}
 			unset($entry);
 		}
