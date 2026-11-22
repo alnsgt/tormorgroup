@@ -1,3 +1,9 @@
+<?php
+$agencyInterbankRate = (new \Settings\CommissionRate)->first(['commission_type' => 'AGENCYBANKING INTERBANK']);
+$agencyInterbankPercent = (float)($agencyInterbankRate->commission_rate ?? 0.5) / 100;
+$agencyInterbankStarting = (float)($agencyInterbankRate->starting_amount ?? 0);
+$agencyInterbankCap = (float)($agencyInterbankRate->cap_value ?? 0);
+?>
 <?php if(user_can('add_agencybanking') || user_can('edit_momoremit')):?>
 <style>
  form {margin-top:40px!important;}
@@ -199,7 +205,7 @@
  </div>
 
   <div class="mb-2">
-  <label class="form-label">GIP charge (1%, capped ₵10.00)</label>
+  <label class="form-label">Interbank dynamic charge</label>
   <input id="charge" name="charge" type="text" class="form-control" readonly>
  </div>
 
@@ -395,7 +401,10 @@ document.addEventListener("DOMContentLoaded", function() {
    loadInput.value = 50000;
    load = 50000;
   }
-  let charge = Math.min(load * 0.01, 10);
+  let charge = load >= <?=json_encode($agencyInterbankStarting)?> ? load * <?=json_encode($agencyInterbankPercent)?> : 0;
+  <?php if ($agencyInterbankCap > 0): ?>
+  charge = Math.min(charge, <?=json_encode($agencyInterbankCap)?>);
+  <?php endif; ?>
   // Apply cents-based rounding rule:
   // - 0.01..0.49 => .50
   // - 0.51..0.99 => next 1.00

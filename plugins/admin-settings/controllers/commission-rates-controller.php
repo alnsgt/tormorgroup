@@ -7,6 +7,7 @@ $plugin_route = get_value()['plugin_route'];
 $rate_id = URL(3) ?? null;
 $commission_rates = new \Settings\CommissionRate;
 $session = get_session();
+$charge_route = 'commission-rates';
 
 /**
  * Automatically creates the commission_rates table if it does not exist
@@ -22,7 +23,9 @@ function ensureCommissionRatesTableExists($model) {
         $sql = "CREATE TABLE IF NOT EXISTS `$table` (
             `id` INT(11) NOT NULL AUTO_INCREMENT,
             `commission_type` VARCHAR(255) NOT NULL COMMENT 'e.g., MTN EVD, Telecel EVD, GhanaPay Cashout, etc.',
+        `charge_type` VARCHAR(20) NOT NULL DEFAULT 'percentage',
             `commission_rate` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'Commission rate as percentage of amount',
+        `starting_amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'Minimum applicable transaction amount',
             `is_capped` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = capped, 0 = not capped',
             `cap_value` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'Maximum commission value if capped',
             `expected_value` DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT 'Expected value as percentage of commission collected',
@@ -40,6 +43,9 @@ function ensureCommissionRatesTableExists($model) {
 }
 
 if (URL(2) === 'commission-rates') {
+    if (function_exists('dynamic_charge_ensure_defaults')) {
+        dynamic_charge_ensure_defaults();
+    }
     
     // Handle POST requests for add/edit
     if (!empty($_POST)) {
@@ -49,7 +55,11 @@ if (URL(2) === 'commission-rates') {
         $action = URL(3) === 'add' ? 'add' : (is_numeric(URL(3)) ? 'edit' : 'list');
         
         $commission_type = trim($_POST['commission_type'] ?? '');
+        $charge_type = in_array(strtolower(trim($_POST['charge_type'] ?? 'percentage')), ['flat', 'percentage'], true)
+            ? strtolower(trim($_POST['charge_type'] ?? 'percentage'))
+            : 'percentage';
         $commission_rate = (float)($_POST['commission_rate'] ?? 0);
+        $starting_amount = (float)($_POST['starting_amount'] ?? 0);
         $is_capped = isset($_POST['is_capped']) ? 1 : 0;
         $cap_value = (float)($_POST['cap_value'] ?? 0);
         $expected_value = (float)($_POST['expected_value'] ?? 0);
@@ -77,7 +87,9 @@ if (URL(2) === 'commission-rates') {
         if (empty($errors)) {
             $data = [
                 'commission_type' => $commission_type,
+                'charge_type' => $charge_type,
                 'commission_rate' => $commission_rate,
+                'starting_amount' => $starting_amount,
                 'is_capped' => $is_capped,
                 'cap_value' => $cap_value,
                 'expected_value' => $expected_value,
@@ -95,7 +107,7 @@ if (URL(2) === 'commission-rates') {
                 } else {
                     $commission_rates->insert($data);
                     $_SESSION['success_message'] = 'Commission rate added successfully';
-                    header('Location: ' . ROOT . '/' . $admin_route . '/' . $plugin_route . '/commission-rates');
+                    header('Location: ' . ROOT . '/' . $admin_route . '/' . $plugin_route . '/' . $charge_route);
                     exit;
                 }
             } else {
@@ -114,7 +126,7 @@ if (URL(2) === 'commission-rates') {
                         if (empty($errors)) {
                             $commission_rates->update($rate_id, $data);
                             $_SESSION['success_message'] = 'Commission rate updated successfully';
-                            header('Location: ' . ROOT . '/' . $admin_route . '/' . $plugin_route . '/commission-rates');
+                            header('Location: ' . ROOT . '/' . $admin_route . '/' . $plugin_route . '/' . $charge_route);
                             exit;
                         }
                     }

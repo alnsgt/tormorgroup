@@ -822,3 +822,110 @@ if(!function_exists('calculate_commission')) {
 		];
 	}
 }
+
+if(!function_exists('dynamic_charge_calculate')) {
+	/**
+	 * Calculate a configured dynamic charge by transaction key.
+	 * Keys are exact commission_type values in commission_rates.
+	 */
+	function dynamic_charge_calculate(string $commissionType, float $amount): float
+	{
+		if(function_exists('get_commission_rate')){
+			$rate = get_commission_rate($commissionType);
+		}else{
+			$rate = null;
+		}
+		if(!$rate || empty($rate->status)){
+			return 0.0;
+		}
+
+		$startingAmount = (float)($rate->starting_amount ?? 0);
+		if($amount < $startingAmount){
+			return 0.0;
+		}
+
+		if(strcasecmp((string)($rate->charge_type ?? 'percentage'), 'flat') === 0){
+			$charge = (float)$rate->commission_rate;
+		}else{
+			$charge = $amount * ((float)$rate->commission_rate) / 100;
+		}
+
+		if(!empty($rate->is_capped)){
+			$charge = min($charge, (float)$rate->cap_value);
+		}
+		return (float)round(max(0, $charge), 2);
+	}
+}
+
+if(!function_exists('dynamic_charge_ensure_defaults')) {
+	function dynamic_charge_ensure_defaults(): void
+	{
+		try{
+			$db = new \Core\Database;
+			if(!$db->table_exists(['commission_rates'])){
+				$db->query("CREATE TABLE IF NOT EXISTS commission_rates (
+					id INT(11) NOT NULL AUTO_INCREMENT,
+					commission_type VARCHAR(255) NOT NULL,
+					charge_type VARCHAR(20) NOT NULL DEFAULT 'percentage',
+					commission_rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+					starting_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+					is_capped TINYINT(1) NOT NULL DEFAULT 0,
+					cap_value DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+					expected_value DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+					status TINYINT(1) NOT NULL DEFAULT 1,
+					date_created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					date_updated TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+					created_by INT(11) DEFAULT NULL,
+					updated_by INT(11) DEFAULT NULL,
+					PRIMARY KEY (id),
+					UNIQUE KEY unique_commission_type (commission_type)
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+			}else{
+				$columns = [
+					'charge_type' => "VARCHAR(20) NOT NULL DEFAULT 'percentage'",
+					'starting_amount' => 'DECIMAL(10,2) NOT NULL DEFAULT 0.00',
+				];
+				foreach($columns as $column => $type){
+					$exists = $db->query(
+						"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+						 WHERE TABLE_SCHEMA = :schema_name AND TABLE_NAME = 'commission_rates' AND COLUMN_NAME = :column_name LIMIT 1",
+						['schema_name' => DB_NAME, 'column_name' => $column]
+					);
+					if(empty($exists)){
+						$db->query("ALTER TABLE commission_rates ADD COLUMN `{$column}` {$type}");
+					}
+				}
+			}
+
+			$defaults = [
+				'EZWICH CHARGE' => ['percentage', 0.10, 1430.00, 1, 50.00],
+				'MTN DATA BUNDLE' => ['flat', 0.50, 0.00, 0, 0.00],
+				'MOMOREMIT GHANAPAY CASHIN' => ['percentage', 0.50, 0.00, 0, 0.00],
+				'AGENCYBANKING WITHDRAWAL CIT GHQR' => ['percentage', 1.00, 0.00, 0, 0.00],
+				'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY' => ['percentage', 0.20, 0.00, 0, 0.00],
+				'AGENCYBANKING INTERBANK' => ['percentage', 0.50, 0.00, 0, 0.00],
+			];
+			foreach($defaults as $type => $config){
+				$existing = $db->query("SELECT id FROM commission_rates WHERE commission_type = :type LIMIT 1", ['type' => $type]);
+				if(empty($existing)){
+					$db->query(
+						"INSERT INTO commission_rates
+						 (commission_type, charge_type, commission_rate, starting_amount, is_capped, cap_value, expected_value, status)
+						 VALUES (:type, :charge_type, :rate, :starting_amount, :is_capped, :cap_value, 0, 1)",
+						[
+							'type' => $type,
+							'charge_type' => $config[0],
+							'rate' => $config[1],
+							'starting_amount' => $config[2],
+							'is_capped' => $config[3],
+							'cap_value' => $config[4],
+						]
+					);
+				}
+			}
+		}catch(\Throwable $e){
+			error_log('[admin-settings] Dynamic charge configuration setup failed: ' . $e->getMessage());
+		}
+	}
+	dynamic_charge_ensure_defaults();
+}

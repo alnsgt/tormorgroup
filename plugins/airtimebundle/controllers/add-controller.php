@@ -241,7 +241,20 @@ foreach($numericFields as $field){
 
 $isJust4uCategory = ($categoryUpper === 'JUST4U');
 $isAirtimeEvdCategory = ($transactionType === 'Airtime' && $categoryUpper === 'EVD');
-$just4uFixedCharge = 0.50;
+$just4uFixedCharge = function_exists('dynamic_charge_calculate')
+	? dynamic_charge_calculate('MTN DATA BUNDLE', (float)($postdata['special_amount_load'] ?? $postdata['amount'] ?? $postdata['amount_to_send'] ?? 0))
+	: 0.50;
+$isMtnDataBundle = (
+	$transactionType !== 'Airtime'
+	&& strcasecmp(trim((string)($postdata['network'] ?? '')), 'MTN') === 0
+	&& in_array($categoryUpper, ['MTN-DATA', 'MASHUP', 'JUST4U', 'MTN UP2U', '5959', 'ISHARE', 'STAFF BUNDLE'], true)
+);
+if ($isMtnDataBundle && !$isJust4uCategory) {
+	$mtnBundleCharge = function_exists('dynamic_charge_calculate')
+		? dynamic_charge_calculate('MTN DATA BUNDLE', (float)($postdata['amount'] ?? $postdata['amount_to_send'] ?? 0))
+		: 0.50;
+	$postdata['commission'] = number_format($mtnBundleCharge, 2, '.', '');
+}
 if ($isJust4uCategory) {
 	$just4uLoadAmount = (float)($postdata['special_amount_load'] ?? ($postdata['amount'] ?? ($postdata['amount_to_send'] ?? 0)));
 	$just4uEcashPayable = max(0, $just4uLoadAmount - $just4uFixedCharge);

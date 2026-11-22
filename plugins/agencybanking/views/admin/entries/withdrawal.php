@@ -1,3 +1,11 @@
+<?php
+$agencyGhqrRate = (new \Settings\CommissionRate)->first(['commission_type' => 'AGENCYBANKING WITHDRAWAL CIT GHQR']);
+$agencyAccountRate = (new \Settings\CommissionRate)->first(['commission_type' => 'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY']);
+$agencyGhqrPercent = (float)($agencyGhqrRate->commission_rate ?? 1) / 100;
+$agencyGhqrCap = (float)($agencyGhqrRate->cap_value ?? 0);
+$agencyAccountPercent = (float)($agencyAccountRate->commission_rate ?? 0.2) / 100;
+$agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
+?>
 <?php if(user_can('add_agencybanking') || user_can('edit_momoremit')):?>
 	<style>
 		form {
@@ -858,10 +866,11 @@
 		}
 
 		const computeFee = function(baseAmount){
-			let computed = roundGhqrFee((Number(baseAmount || 0)) * 0.01);
-			if ((Number(baseAmount || 0)) > 2000) {
-				computed = Math.min(computed, 20);
-			}
+			const provider = (sourceSelect.value || '').trim();
+			const rate = provider === 'GhQR' ? <?=json_encode($agencyGhqrPercent)?> : <?=json_encode($agencyAccountPercent)?>;
+			const cap = provider === 'GhQR' ? <?=json_encode($agencyGhqrCap)?> : <?=json_encode($agencyAccountCap)?>;
+			let computed = roundGhqrFee((Number(baseAmount || 0)) * rate);
+			if (cap > 0) computed = Math.min(computed, cap);
 			return computed;
 		};
 
@@ -887,10 +896,11 @@
 		let fee = 0;
 
 		const computeFee = function(baseAmount){
-			let computed = roundGhqrFee((Number(baseAmount || 0)) * 0.01);
-			if ((Number(baseAmount || 0)) > 2000) {
-				computed = Math.min(computed, 20);
-			}
+			const provider = (sourceSelect.value || '').trim();
+			const rate = provider === 'GhQR' ? <?=json_encode($agencyGhqrPercent)?> : <?=json_encode($agencyAccountPercent)?>;
+			const cap = provider === 'GhQR' ? <?=json_encode($agencyGhqrCap)?> : <?=json_encode($agencyAccountCap)?>;
+			let computed = roundGhqrFee((Number(baseAmount || 0)) * rate);
+			if (cap > 0) computed = Math.min(computed, cap);
 			return computed;
 		};
 

@@ -672,8 +672,10 @@
 		});
 
 	  function calculateCharge() {
-		  const charge = <?=$settings->ezwich_charges ?? 0?>;
-		  const capValue = 10;
+		  <?php $ezwichDynamicCharge = (new \Settings\CommissionRate)->first(['commission_type' => 'EZWICH CHARGE']); ?>
+		  const charge = <?= (float)($ezwichDynamicCharge->commission_rate ?? $settings->ezwich_charges ?? 0) / 100 ?>;
+		  const startingAmount = <?= (float)($ezwichDynamicCharge->starting_amount ?? 1430) ?>;
+		  const capValue = <?= (float)($ezwichDynamicCharge->cap_value ?? 50) ?>;
 		  const type = (transferType.value || "").trim();
 
 		  const toNum = (val) => {
@@ -695,7 +697,7 @@
 				  amountPayableRoundedInput.value = "";
 				  return;
 			  }
-			  const computedCharge = Math.min(balance * charge, capValue);
+			  const computedCharge = (balance < startingAmount) ? 0 : Math.min(balance * charge, capValue);
 			  chargeInput.value = computedCharge.toFixed(2);
 			  const amountPayable = balance - computedCharge;
 			  amountPayableInput.value = amountPayable.toFixed(2);
@@ -713,7 +715,7 @@
 			  }
 			  amountPayableRoundedInput.value = requested.toString();
 			  amountPayableInput.value = requested.toFixed(2);
-			  const computedCharge = Math.min(requested * charge, capValue);
+			  const computedCharge = (requested < startingAmount) ? 0 : Math.min(requested * charge, capValue);
 			  chargeInput.value = computedCharge.toFixed(2);
 		  }
 	    }

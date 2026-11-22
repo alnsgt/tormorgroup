@@ -25,6 +25,20 @@ return [
             'comment' => 'Commission rate as percentage of amount'
         ],
         [
+            'name' => 'charge_type',
+            'type' => 'VARCHAR',
+            'constraint' => 20,
+            'default' => 'percentage',
+            'comment' => 'percentage or flat'
+        ],
+        [
+            'name' => 'starting_amount',
+            'type' => 'DECIMAL',
+            'constraint' => '10,2',
+            'default' => 0,
+            'comment' => 'Minimum transaction amount'
+        ],
+        [
             'name' => 'is_capped',
             'type' => 'TINYINT',
             'constraint' => 1,

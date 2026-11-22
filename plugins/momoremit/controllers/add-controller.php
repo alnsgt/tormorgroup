@@ -256,6 +256,15 @@ if ($csrf && $momoremit->validate_insert($postdata)) {
             foreach (['amount_load','amount_sendable','amount_payable','cash_received_amount','change_required','amount','balance_after','charge'] as $moneyField) {
                 $postdata[$moneyField] = $normalizeMoneyField($postdata[$moneyField] ?? '');
             }
+            $simType = strtolower(trim((string)($postdata['sim_type'] ?? '')));
+            $networkNorm = strtolower(trim($network));
+            if ($simType === 'bank' && $networkNorm === 'ghanapay' && function_exists('dynamic_charge_calculate')) {
+                $cashInAmount = (float)($postdata['amount_load'] ?? $postdata['amount'] ?? 0);
+                $dynamicCharge = dynamic_charge_calculate('MOMOREMIT GHANAPAY CASHIN', $cashInAmount);
+                $postdata['charge'] = $normalizeMoneyField($dynamicCharge);
+                $postdata['amount_payable'] = $normalizeMoneyField($cashInAmount + $dynamicCharge);
+                $postdata['amount_sendable'] = $normalizeMoneyField($cashInAmount);
+            }
             if (function_exists('momoremits_apply_merchant_cashin_sending_amounts')) {
                 $postdata = momoremits_apply_merchant_cashin_sending_amounts($postdata);
             }

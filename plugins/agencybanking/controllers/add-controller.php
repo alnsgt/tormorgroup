@@ -210,7 +210,8 @@
 			// - No charge for withdrawals EXCEPT GHQR/GCB + Withdrawal (CIT)
 			$txTypeLower = strtolower($txTypeRaw);
 			$isWithdrawal = (stripos($txTypeRaw, 'withdrawal') !== false);
-			$isGhqrCitWithdrawal = in_array(strtoupper(trim((string)$networkRaw)), ['GHQR', 'GCB'], true) && (strcasecmp($txTypeRaw, 'Withdrawal (CIT)') === 0);
+			$withdrawalProvider = strtoupper(trim((string)$networkRaw));
+			$isGhqrCitWithdrawal = in_array($withdrawalProvider, ['GHQR', 'GCB', 'FIDELITY BANK', 'FIDELITY'], true) && (strcasecmp($txTypeRaw, 'Withdrawal (CIT)') === 0);
 			if ($isWithdrawal) {
 				$postdata['transaction_status'] = 'Approved';
 				if (!$isGhqrCitWithdrawal) {
@@ -237,19 +238,24 @@
 			if ($isGhqrCitWithdrawal) {
 				$withdrawn = (float)($postdata['amount_withdrawn'] ?? 0);
 				$payable = (float)($postdata['amount_payable'] ?? 0);
-				$charge = (float)($postdata['charge'] ?? 0);
-				$baseForCap = max($withdrawn, $payable);
-				if ($baseForCap > 2000 && $charge > 20) {
-					$charge = 20;
-					$postdata['charge'] = number_format($charge, 2, '.', '');
-					if ($withdrawn > 0) {
-						$postdata['amount_payable'] = number_format(max(0, $withdrawn - $charge), 2, '.', '');
-					}
+				$dynamicKey = $withdrawalProvider === 'GHQR'
+					? 'AGENCYBANKING WITHDRAWAL CIT GHQR'
+					: 'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY';
+				$charge = function_exists('dynamic_charge_calculate')
+					? dynamic_charge_calculate($dynamicKey, max($withdrawn, $payable))
+					: (float)($postdata['charge'] ?? 0);
+				$postdata['charge'] = number_format($charge, 2, '.', '');
+				if ($withdrawn > 0) {
+					$postdata['amount_payable'] = number_format(max(0, $withdrawn - $charge), 2, '.', '');
 				}
 			}
 
 			if (strpos($txTypeLower, 'interbank') !== false || strpos($txTypeLower, 'gip') !== false) {
 				$charge = (float)($postdata['charge'] ?? 0);
+				$interbankLoad = (float)($postdata['amount'] ?? $postdata['amount_load'] ?? 0);
+				if (function_exists('dynamic_charge_calculate')) {
+					$charge = dynamic_charge_calculate('AGENCYBANKING INTERBANK', $interbankLoad);
+				}
 				if ($charge > 0) {
 					$base = floor($charge);
 					$frac = $charge - $base;

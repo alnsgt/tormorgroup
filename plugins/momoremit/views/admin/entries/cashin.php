@@ -1,3 +1,9 @@
+<?php
+$momoremitGhanaPayRate = (new \Settings\CommissionRate)->first(['commission_type' => 'MOMOREMIT GHANAPAY CASHIN']);
+$momoremitGhanaPayPercent = (float)($momoremitGhanaPayRate->commission_rate ?? 0.50) / 100;
+$momoremitGhanaPayStarting = (float)($momoremitGhanaPayRate->starting_amount ?? 0);
+$momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
+?>
 <?php if(user_can('add_momoremit')):?>
 	<style>
 		form {
@@ -1720,7 +1726,11 @@
         const isGhanapay = normVal(networkSelect.value) === 'ghanapay';
         const isBankSim = sim === 'bank';
         if (isGhanapay && isBankSim && amt > 0) {
-          const specialCharge = Math.min(amt * 0.01, 10);
+          const ghanapayRate = <?=json_encode($momoremitGhanaPayPercent)?>;
+          const ghanapayStarting = <?=json_encode($momoremitGhanaPayStarting)?>;
+          const ghanapayCap = <?=json_encode($momoremitGhanaPayCap)?>;
+          let specialCharge = amt >= ghanapayStarting ? amt * ghanapayRate : 0;
+          if (ghanapayCap > 0) specialCharge = Math.min(specialCharge, ghanapayCap);
           charge = round2(specialCharge);
           payable = round2(amt + charge);
           toSend = round2(amt);

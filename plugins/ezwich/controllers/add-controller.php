@@ -88,6 +88,10 @@
 			if ($effectiveAmount <= 0 && !empty($postdata['amount_payable'])) {
 				$postdata['amount'] = (float)$postdata['amount_payable'];
 			}
+			if (function_exists('dynamic_charge_calculate')) {
+				$chargeBase = (float)($postdata['amount'] ?? $postdata['amount_payable'] ?? 0);
+				$postdata['charge'] = dynamic_charge_calculate('EZWICH CHARGE', $chargeBase);
+			}
 
 			// Cashdrawer is the primary accounting source: sync this ezwich transaction
 			$syncPayload = $postdata;

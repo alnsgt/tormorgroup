@@ -1,3 +1,7 @@
+<?php
+$mtnDataBundleCharge = (new \Settings\CommissionRate)->first(['commission_type' => 'MTN DATA BUNDLE']);
+$mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50);
+?>
 <?php if(user_can('add_momoremit')):?>
 	<style>
 		form {
@@ -100,9 +104,9 @@
 			<?php endif?>
 
 			<label for="just4u_charge" class="form-label mt-2">Charge</label>
-			<input type="text" class="form-control" id="just4u_charge" name="just4u_charge" value="0.50" readonly>
+			<input type="text" class="form-control" id="just4u_charge" name="just4u_charge" value="<?=number_format($mtnDataBundleFlatCharge, 2)?>" readonly>
 			<label for="just4u_payable" class="form-label mt-2">Amount Payable</label>
-			<input type="text" class="form-control" id="just4u_payable" name="just4u_payable" value="5.50" readonly>
+			<input type="text" class="form-control" id="just4u_payable" name="just4u_payable" value="<?=number_format(5 + $mtnDataBundleFlatCharge, 2)?>" readonly>
 			<small class="text-muted d-block mt-1" id="just4u_split_hint"></small>
 			<label for="just4u_paid" class="form-label mt-2">Amount Paid</label>
 			<label class="input-group" data-bs-toggle="modal" data-bs-target="#staticBackdrop">
@@ -150,7 +154,7 @@
 				<input type="text" class="form-control" id="special_amount_paid" name="special_amount_paid" placeholder="Enter amount paid value" value="<?=old_value('special_amount_paid')?>" readonly>
 				<input type="hidden" id="denos_special" name="denos_special" value="<?=htmlspecialchars((string)old_value('denos_special'), ENT_QUOTES, 'UTF-8')?>" />
 			</label>
-			<small class="text-muted d-none js-just4u-fixed-charge-hint">JUST4U deducts Amount Payable from e-cash. Amount paid must match the full entered amount; GHS 0.50 is recorded as commission.</small>
+			<small class="text-muted d-none js-just4u-fixed-charge-hint">JUST4U deducts Amount Payable from e-cash. Amount paid must match the full entered amount; the configured MTN data bundle charge is recorded as commission.</small>
 			<small class="text-danger js-special-error"></small>
 		</div>
 		
@@ -400,6 +404,8 @@
 
 <script>
 
+	const mtnDataBundleCharge = <?=json_encode($mtnDataBundleFlatCharge)?>;
+
 	const categoryOptions = {
 		
 		"MTN": [
@@ -594,7 +600,7 @@
         function syncJust4uPayableField() {
             const isJust4u = categorySelect && categorySelect.value === 'JUST4U';
             const loadAmount = parseFloat(specialAmountLoadInput?.value || '0') || 0;
-            const payableAmount = Math.max(0, loadAmount - 0.50);
+            const payableAmount = Math.max(0, loadAmount - mtnDataBundleCharge);
 
             if (just4uPayableLabel) {
                 just4uPayableLabel.classList.toggle('d-none', !isJust4u);
@@ -676,7 +682,7 @@
             } else if (['5959', 'MTN UP2U', 'ISHARE', 'JUST4U'].includes(categoryValue)) {
                 const loadAmount = parseFloat(specialAmountLoadInput?.value || '0');
                 const paidAmount = parseFloat(specialAmountPaidInput?.value || '0');
-                const ecashPayableAmount = Math.max(0, loadAmount - 0.50);
+                const ecashPayableAmount = Math.max(0, loadAmount - mtnDataBundleCharge);
                 syncJust4uPayableField();
                 specialError.textContent = '';
 
@@ -867,7 +873,7 @@
     function syncJust4uPayableField() {
       const isJust4u = categorySelect && categorySelect.value === 'JUST4U';
       const loadAmount = roundMoney(specialAmountLoadInput && specialAmountLoadInput.value);
-      const payableAmount = Math.max(0, loadAmount - 0.50);
+      const payableAmount = Math.max(0, loadAmount - mtnDataBundleCharge);
 
       if (just4uPayableLabel) {
         just4uPayableLabel.classList.toggle('d-none', !isJust4u);
