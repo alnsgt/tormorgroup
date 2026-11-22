@@ -1,12 +1,21 @@
 <?php
 $agencyGhqrRate = (new \Settings\CommissionRate)->first(['commission_type' => 'AGENCYBANKING WITHDRAWAL CIT GHQR']);
 $agencyAccountRate = (new \Settings\CommissionRate)->first(['commission_type' => 'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY']);
-$agencyGhqrPercent = (float)($agencyGhqrRate->commission_rate ?? 1) / 100;
+$agencyGhqrRateValue = (float)($agencyGhqrRate->commission_rate ?? 1);
+$agencyGhqrChargeType = strtolower((string)($agencyGhqrRate->charge_type ?? 'percentage'));
+$agencyGhqrStarting = (float)($agencyGhqrRate->starting_amount ?? 0);
 $agencyGhqrCap = (float)($agencyGhqrRate->cap_value ?? 0);
-$agencyAccountPercent = (float)($agencyAccountRate->commission_rate ?? 0.2) / 100;
+$agencyGhqrIsCapped = !empty($agencyGhqrRate->is_capped);
+$agencyAccountRateValue = (float)($agencyAccountRate->commission_rate ?? 0.2);
+$agencyAccountChargeType = strtolower((string)($agencyAccountRate->charge_type ?? 'percentage'));
+$agencyAccountStarting = (float)($agencyAccountRate->starting_amount ?? 0);
 $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
+$agencyAccountIsCapped = !empty($agencyAccountRate->is_capped);
 ?>
 <?php if(user_can('add_agencybanking') || user_can('edit_momoremit')):?>
+	<link rel="stylesheet" href="<?=plugin_http_path('assets/css/agency-forms.css')?>?v=<?= (int)filemtime(__DIR__ . '/../../../assets/css/agency-forms.css') ?>">
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -118,7 +127,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	 
 			<div class="mb-2">
 				<label for="transaction_type" class="form-label">Transaction type</label>
-				<select class="form-select transaction_type" id="transaction_type" name="transaction_type"  onchange="updateSourceOptions()">
+				<select class="form-select transaction_type choice-badge-select" id="transaction_type" name="transaction_type"  onchange="updateSourceOptions()">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_type','Withdrawal (AIT)')?> value="Withdrawal (AIT)">Withdrawal (AIT)</option>
 				  <option <?=old_select('transaction_type','Withdrawal (CIT)')?> value="Withdrawal (CIT)">Withdrawal (CIT)</option>
@@ -131,7 +140,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	 
 			<div class="mb-2">
 				<label for="network" class="form-label">Service provider</label>
-				<select class="form-select" name="network" id="network">			  
+				<select class="form-select choice-badge-select" name="network" id="network">
 				  </select>
 
 				<?php if(!empty($errors['network'])):?>
@@ -141,7 +150,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	 
 			<div class="mb-2 d-none category">
 				<label for="category" class="form-label">CIT Type</label>
-				<select class="form-select" name="category" id="category">		
+				<select class="form-select choice-badge-select" name="category" id="category">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('category','Self')?> value="Self">Self</option>
 				  <option <?=old_select('category','3rd Party')?> value="3rd Party">3rd Party</option>	  
@@ -153,7 +162,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	 
 			<div class="mb-2 d-none payment_medium">
 				<label for="payment_medium" class="form-label">Medium Used</label>
-				<select class="form-select" name="payment_medium" id="payment_medium">		
+				<select class="form-select choice-badge-select" name="payment_medium" id="payment_medium">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('payment_medium','Fidelity App')?> value="Fidelity App">Fidelity App</option>
 				  <option <?=old_select('payment_medium','Fidelity-GhQr ussd')?> value="Fidelity-GhQr ussd">Fidelity-GhQr ussd</option>	  
@@ -167,7 +176,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 
 			<div class="mb-2 d-none charging_type">
 				<label for="charging_type" class="form-label">Charging type</label>
-				<select class="form-select" name="charging_type" id="charging_type">
+				<select class="form-select choice-badge-select" name="charging_type" id="charging_type">
 					<option value="">---Select---</option>
 					<option <?=old_select('charging_type','minus')?> value="minus">- charge</option>
 					<option <?=old_select('charging_type','plus')?> value="plus">+ charge</option>
@@ -215,7 +224,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	 
 			<div class="mb-2 sof_option d-none">
 				<label for="sof_option" class="form-label">Source Option</label>
-				<select class="form-select" name="sof_option" id="sof_option">		
+				<select class="form-select choice-badge-select" name="sof_option" id="sof_option">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('sof_option','Telco')?> value="Telco">Telco</option>
 				  <option <?=old_select('sof_option','Bank')?> value="Bank">Bank</option>	  
@@ -227,7 +236,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	 
 			<div class="mb-2 sof d-none">
 				<label for="sof" class="form-label">Source of Funds</label>
-				<select class="form-select" name="cash_source" id="sof">		
+				<select class="form-select choice-badge-select" name="cash_source" id="sof">
 				  <option value="">---Select---</option>
 				  </select>
 				<?php if(!empty($errors['cash_source'])):?>
@@ -239,6 +248,12 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 			  <label for="amount_payable" class="form-label">Amount after Charge (amount payable)</label>
 			  <input name="amount_payable" value="<?=old_value('amount_payable')?>" type="number" step="0.01" class="form-control disabled" id="amount_payable" placeholder="Amount payable" readonly>
 			  <input name="charge" value="<?=old_value('charge')?>" type="hidden" id="charge">
+				<div class="agency-amount-breakdown" id="withdrawalBreakdown" aria-live="polite" aria-atomic="true" hidden>
+					<div class="agency-amount-breakdown__item"><span>Amount requested</span><strong id="withdrawalRequested">GHS 0.00</strong></div>
+					<div class="agency-amount-breakdown__item"><span id="withdrawalChargeLabel">Charge deducted</span><strong id="withdrawalCharge">GHS 0.00</strong></div>
+					<div class="agency-amount-breakdown__item"><span id="withdrawalPayableLabel">Amount paid out</span><strong id="withdrawalPayable">GHS 0.00</strong></div>
+					<div class="agency-amount-breakdown__item"><span>Total account debit</span><strong id="withdrawalDebit">GHS 0.00</strong></div>
+				</div>
 				
 				<?php if(!empty($errors['amount_payable'])):?>
 				  <small class="text-danger"><?=$errors['amount_payable']?></small>
@@ -288,7 +303,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 				<input type="hidden" id="transaction_status_hidden" name="transaction_status" value="Approved">
 				<div class="mb-2 transaction_status d-none">
 				  <label for="transaction_status_select" class="form-label">Status</label>
-				  <select class="form-select" id="transaction_status_select">
+				  <select class="form-select choice-badge-select" id="transaction_status_select">
 					<option value="Draft">Draft</option>
 					<option value="Pending">Pending</option>
 					<option value="Approved" selected>Approved</option>
@@ -465,6 +480,20 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	const amountWithdrawnLimitError = document.getElementById('amount-withdrawn-limit-error');
 	const amountWithdrawnLimitHint = document.getElementById('amount-withdrawn-limit-hint');
 	const amountWithdrawnLegacyHint = document.querySelector('.amount_withdrawn small.text-muted:not(#amount-withdrawn-limit-hint)');
+	const withdrawalBreakdown = document.getElementById('withdrawalBreakdown');
+	function updateWithdrawalBreakdown() {
+		const requested = parseFloat(amountWithdrawnInput.value) || 0;
+		const charge = parseFloat(chargeInput.value) || 0;
+		const payable = parseFloat(amountPayableInput.value) || 0;
+		const isPlus = getChargeMode() === 'plus';
+		withdrawalBreakdown.hidden = !isGhqrCit() || requested <= 0;
+		document.getElementById('withdrawalRequested').textContent = `GHS ${requested.toFixed(2)}`;
+		document.getElementById('withdrawalCharge').textContent = `GHS ${charge.toFixed(2)}`;
+		document.getElementById('withdrawalPayable').textContent = `GHS ${payable.toFixed(2)}`;
+		document.getElementById('withdrawalChargeLabel').textContent = isPlus ? 'Charge added' : 'Charge deducted';
+		document.getElementById('withdrawalPayableLabel').textContent = isPlus ? 'Amount paid out' : 'Amount paid after charge';
+		document.getElementById('withdrawalDebit').textContent = `GHS ${(requested + (isPlus ? charge : 0)).toFixed(2)}`;
+	}
 
 	(function(){
 		const modalEl = document.getElementById('staticBackdrop');
@@ -731,11 +760,15 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 
 	function isGhqrCit() {
 		const provider = (sourceSelect.value || '').trim();
-		return transactionType.value === 'Withdrawal (CIT)' && ['GhQR', 'GCB'].includes(provider);
+		return transactionType.value === 'Withdrawal (CIT)' && ['GhQR', 'GCB', 'Fidelity Bank'].includes(provider);
+	}
+
+	function isFidelityAccountToAccount() {
+		return transactionType.value === 'Withdrawal (CIT)' && sourceSelect.value === 'Fidelity Bank';
 	}
 
 	function syncTransactionStatusUi() {
-		const useStatusSelect = isGhqrCit();
+		const useStatusSelect = isGhqrCit() && !isFidelityAccountToAccount();
 		const statusWrapper = document.querySelector('.transaction_status');
 		if (statusWrapper) {
 			statusWrapper.classList.toggle('d-none', !useStatusSelect);
@@ -822,106 +855,54 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	function roundGhqrFee(value) {
 		const x = Number(value || 0);
 		if (!x || x <= 0) return 0;
-		const base = Math.floor(x);
-		const frac = x - base;
-		if (frac === 0) return base;
-		if (frac <= 0.5) return base + 0.5;
-		return base + 1.0;
+		return Math.ceil(x * 10 - 1e-9) / 10;
 	}
 
 	function applyGhqrModeUi() {
 		if (!isGhqrCit()) return;
-		const mode = getChargeMode();
-		if (mode === 'plus') {
-			amountPayableInput.readOnly = false;
-			amountPayableInput.disabled = false;
-			amountPayableInput.removeAttribute('readonly');
-			amountPayableInput.removeAttribute('disabled');
-			amountPayableInput.classList.remove('disabled');
-			amountPayableInput.style.pointerEvents = 'auto';
-
-			amountWithdrawnInput.readOnly = false;
-			amountWithdrawnInput.disabled = false;
-			amountWithdrawnInput.removeAttribute('readonly');
-			amountWithdrawnInput.removeAttribute('disabled');
-			amountWithdrawnInput.classList.remove('disabled');
-			amountWithdrawnInput.style.pointerEvents = 'auto';
-		} else {
-			amountPayableInput.readOnly = true;
-			amountPayableInput.setAttribute('readonly', 'readonly');
-			amountPayableInput.classList.add('disabled');
-			amountPayableInput.style.pointerEvents = 'none';
-
-			amountWithdrawnInput.readOnly = false;
-			amountWithdrawnInput.disabled = false;
-			amountWithdrawnInput.removeAttribute('readonly');
-			amountWithdrawnInput.removeAttribute('disabled');
-		}
-	}
-
-	function solveGhqrPayableFromWithdrawn(withdrawnAmount) {
-		let withdrawn = Number(withdrawnAmount || 0);
-		if (!withdrawn || withdrawn <= 0) {
-			return { payable: 0, fee: 0 };
-		}
-
-		const computeFee = function(baseAmount){
-			const provider = (sourceSelect.value || '').trim();
-			const rate = provider === 'GhQR' ? <?=json_encode($agencyGhqrPercent)?> : <?=json_encode($agencyAccountPercent)?>;
-			const cap = provider === 'GhQR' ? <?=json_encode($agencyGhqrCap)?> : <?=json_encode($agencyAccountCap)?>;
-			let computed = roundGhqrFee((Number(baseAmount || 0)) * rate);
-			if (cap > 0) computed = Math.min(computed, cap);
-			return computed;
-		};
-
-		// In plus mode:
-		// withdrawn = payable + roundGhqrFee(payable * 0.01)
-		// Solve by fixed-point iteration (few steps is enough due to small fee).
-		let payable = withdrawn;
-		for (let i = 0; i < 6; i++) {
-			const fee = computeFee(payable);
-			payable = withdrawn - fee;
-			if (payable < 0) payable = 0;
-		}
-		const fee = computeFee(payable);
-		return { payable, fee };
+		amountPayableInput.readOnly = true;
+		amountPayableInput.disabled = false;
+		amountPayableInput.setAttribute('readonly', 'readonly');
+		amountPayableInput.removeAttribute('disabled');
+		amountPayableInput.classList.add('disabled');
+		amountPayableInput.style.pointerEvents = 'none';
+		amountWithdrawnInput.readOnly = false;
+		amountWithdrawnInput.disabled = false;
+		amountWithdrawnInput.removeAttribute('readonly');
+		amountWithdrawnInput.removeAttribute('disabled');
+		amountWithdrawnInput.classList.remove('disabled');
+		amountWithdrawnInput.style.pointerEvents = 'auto';
 	}
 
 	function calculateGhqrAmounts() {
 		if (!isGhqrCit()) return;
 		applyGhqrModeUi();
 		const mode = getChargeMode();
-		let withdrawn = parseFloat(amountWithdrawnInput.value) || 0;
-		let payable = parseFloat(amountPayableInput.value) || 0;
+		const withdrawn = parseFloat(amountWithdrawnInput.value) || 0;
+		let payable = 0;
 		let fee = 0;
 
 		const computeFee = function(baseAmount){
 			const provider = (sourceSelect.value || '').trim();
-			const rate = provider === 'GhQR' ? <?=json_encode($agencyGhqrPercent)?> : <?=json_encode($agencyAccountPercent)?>;
+			const rate = provider === 'GhQR' ? <?=json_encode($agencyGhqrRateValue)?> : <?=json_encode($agencyAccountRateValue)?>;
+			const chargeType = provider === 'GhQR' ? <?=json_encode($agencyGhqrChargeType)?> : <?=json_encode($agencyAccountChargeType)?>;
+			const startingAmount = provider === 'GhQR' ? <?=json_encode($agencyGhqrStarting)?> : <?=json_encode($agencyAccountStarting)?>;
 			const cap = provider === 'GhQR' ? <?=json_encode($agencyGhqrCap)?> : <?=json_encode($agencyAccountCap)?>;
-			let computed = roundGhqrFee((Number(baseAmount || 0)) * rate);
-			if (cap > 0) computed = Math.min(computed, cap);
-			return computed;
+			const isCapped = provider === 'GhQR' ? <?=json_encode($agencyGhqrIsCapped)?> : <?=json_encode($agencyAccountIsCapped)?>;
+			if (baseAmount < startingAmount) return 0;
+			let computed = chargeType === 'flat' ? rate : Number(baseAmount || 0) * rate / 100;
+			if (isCapped && cap > 0) computed = Math.min(computed, cap);
+			return roundGhqrFee(computed);
 		};
 
-		if (mode === 'plus') {
-			// In plus mode, keep amount_withdrawn editable and treat it as the TOTAL.
-			// Solve payable and fee from withdrawn without overwriting the user's input.
-			withdrawn = parseFloat(amountWithdrawnInput.value) || 0;
-			const solved = solveGhqrPayableFromWithdrawn(withdrawn);
-			payable = Number(solved.payable || 0);
-			fee = Number(solved.fee || 0);
-			amountPayableInput.value = payable ? payable.toFixed(2) : '';
-		} else {
-			withdrawn = parseFloat(amountWithdrawnInput.value) || 0;
-			fee = computeFee(withdrawn);
-			payable = withdrawn - fee;
-			amountPayableInput.value = payable.toFixed(2);
-		}
+		fee = computeFee(withdrawn);
+		payable = mode === 'plus' ? withdrawn : Math.max(0, withdrawn - fee);
+		amountPayableInput.value = payable ? payable.toFixed(2) : '';
 
 		if (chargeInput) {
 			chargeInput.value = fee.toFixed(2);
 		}
+		updateWithdrawalBreakdown();
 		validateForm();
 	}
 
@@ -938,6 +919,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 		if (amountPayableInput) {
 			amountPayableInput.value = withdrawn ? withdrawn.toFixed(2) : '';
 		}
+		updateWithdrawalBreakdown();
 		validateForm();
 	}
 
@@ -1056,7 +1038,7 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 		const statusWrapper = document.querySelector('.transaction_status');
 		const actionWrapper = saveButton ? saveButton.closest('.d-flex') : null;
 		const isGcbService = sourceValue === 'GCB';
-		const isGhqrLikeCit = isGhqrCit();
+		const isGhqrLikeCit = isGhqrCit() && !isFidelityAccountToAccount();
 
 		// Hide all fields initially
 		category.classList.add('d-none');
@@ -1096,6 +1078,8 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 				if (charging_type) charging_type.style.order = '2';
 				if (amountWithdrawn) amountWithdrawn.style.order = '3';
 				if (amount_payable) amount_payable.style.order = '4';
+			} else if (isFidelityAccountToAccount()) {
+				amount_payable.classList.remove('d-none');
 			} else if (isGhqrLikeCit) {
 				category.classList.remove('d-none');
 				payment_medium.classList.remove('d-none');
@@ -1174,6 +1158,9 @@ $agencyAccountCap = (float)($agencyAccountRate->cap_value ?? 0);
 	document.getElementById('other_phone').addEventListener('input', validateForm);
 	document.getElementById('account_number').addEventListener('input', validateForm);
 	document.getElementById('amount_payable').addEventListener('input', validateForm);
+	amountWithdrawnInput.addEventListener('input', updateWithdrawalBreakdown);
+	if (chargingTypeSelect) chargingTypeSelect.addEventListener('change', updateWithdrawalBreakdown);
+	updateWithdrawalBreakdown();
 	document.getElementById('sof').addEventListener('change', validateForm);
 	document.getElementById('payment_medium').addEventListener('change', validateForm);
 

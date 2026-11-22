@@ -809,6 +809,52 @@ if (!function_exists('ezwich_delete_charge_commission')) {
     }
 }
 
+if (!function_exists('ezwich_sync_charge_commission')) {
+    function ezwich_sync_charge_commission(object $transaction, int $actorUserId): bool
+    {
+        $transId = (int)($transaction->id ?? 0);
+        if ($transId <= 0 || !ezwich_table_exists('commissions')) {
+            return $transId > 0;
+        }
+
+        if (!ezwich_delete_charge_commission($transId)) {
+            return false;
+        }
+
+        $charge = round(max(0, (float)($transaction->charge ?? 0)), 2);
+        $status = strtolower(trim((string)($transaction->transaction_status ?? '')));
+        if ($charge <= 0 || in_array($status, ['rejected', 'declined'], true)) {
+            return true;
+        }
+
+        $dateCreated = $transaction->date_created ?? date('Y-m-d H:i:s');
+        $commissionInsert = [
+            'date_received' => $dateCreated,
+            'colletion_period' => 'INSTANT',
+            'network' => $transaction->network ?? null,
+            'commission_type' => 'EZWICH CHARGE',
+            'description' => 'EZWICH CHARGE | ' . ($transaction->transaction_type ?? '') . ' | ID ' . $transId,
+            'pay_to' => (int)($transaction->created_by ?? $actorUserId),
+            'receiving_wallet' => null,
+            'amount' => $charge,
+            'transaction_status' => $transaction->transaction_status ?? 'Approved',
+            'created_by' => (int)($transaction->created_by ?? $actorUserId),
+            'updated_by' => null,
+            'disabled' => 0,
+            'deleted' => 0,
+            'date_created' => $dateCreated,
+            'date_updated' => null,
+            'date_deleted' => null,
+        ];
+
+        $db = new Database();
+        $sql = "INSERT INTO commissions (" . implode(',', array_keys($commissionInsert)) . ") VALUES (:" . implode(',:', array_keys($commissionInsert)) . ")";
+        $db->query($sql, $commissionInsert);
+
+        return !$db->has_error;
+    }
+}
+
 if (!function_exists('ezwich_reverse_approved_effects')) {
     function ezwich_reverse_approved_effects(object $transaction, string $transStatus): array
     {
@@ -892,8 +938,14 @@ if (!function_exists('ezwich_reverse_approved_effects')) {
             $result['ecash_closing_balance'] = $ecashResult['closing_balance'] ?? null;
         }
 
-        // Ezwich charges are not commissions; this only cleans up legacy rows if they exist.
-        ezwich_delete_charge_commission($transId);
+        if (!ezwich_delete_charge_commission($transId)) {
+            return [
+                'ok' => false,
+                'cashdrawer_closing_balance' => $result['cashdrawer_closing_balance'],
+                'ecash_closing_balance' => $result['ecash_closing_balance'],
+                'message' => 'Commission reversal failed for this transaction.',
+            ];
+        }
 
         return $result;
     }

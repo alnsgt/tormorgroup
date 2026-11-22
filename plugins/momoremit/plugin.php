@@ -52,6 +52,10 @@ if(!$db->table_exists($tables)){
 	die;
 }
 
+$sharedAccountHelperPath = realpath(__DIR__ . '/../users-manager/helpers/shared-account-assignments.php');
+if ($sharedAccountHelperPath) {
+	require_once $sharedAccountHelperPath;
+}
 require_once plugin_path('helpers/transactions-helper.php');
 require_once plugin_path('helpers/commission-helper.php');
 $whatsappHelperPath = realpath(__DIR__ . '/../backoffice/helpers/whatsapp-notifications.php');

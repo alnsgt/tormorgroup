@@ -1,5 +1,7 @@
 <?php if(user_can('add_agencybanking')):?>
 	<link rel="stylesheet" href="<?=plugin_http_path('assets/css/agency-forms.css')?>?v=<?= (int)filemtime(__DIR__ . '/../../assets/css/agency-forms.css') ?>">
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<form method="post" enctype="multipart/form-data" class="agency-entry-form">
 		<div class="agency-form-fields row g-3">
 			
@@ -12,7 +14,7 @@
 	 
 			<div class="mb-3 col-md-12 col-lg-6">
 				<label for="transaction_type" class="form-label">Transaction type</label>
-				<select class="form-select transaction_type" id="transaction_type" name="transaction_type" onchange="updateCategoryOptions(); updateSourceOptions();">
+				<select class="form-select transaction_type choice-badge-select" id="transaction_type" name="transaction_type">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_type','Withdrawal (CIT)')?> value="Withdrawal (CIT)">Withdrawal (CIT)</option>
 				  <option <?=old_select('transaction_type','Withdrawal (AIT)')?> value="Withdrawal (AIT)">Withdrawal (AIT)</option>
@@ -32,9 +34,10 @@
 	 
 			<div class="mb-3 col-md-12 col-lg-6">
 				<label for="network" class="form-label">Service provider</label>
-				<select class="form-select" name="network" id="network" onchange="showFields()" data-old="<?=esc(old_value('network'))?>">			  
+				<select class="form-select visually-hidden" name="network" id="network" data-old="<?=esc(old_value('network'))?>">
 				  <!-- Options will be populated dynamically based on transaction type -->
 				</select>
+				<div class="agency-choice-badges" id="networkChoiceBadges" role="group" aria-label="Select service provider"></div>
 
 				<?php if(!empty($errors['network'])):?>
 				  <small class="text-danger"><?=$errors['network']?></small>
@@ -43,9 +46,10 @@
 	 
 			<div class="mb-3 col-md-12 col-lg-6 category d-none">
 				<label for="category" class="form-label">Category</label>
-				<select class="form-select" name="category" id="category" onchange="showFields()" data-old="<?=esc(old_value('category'))?>">
+				<select class="form-select visually-hidden" name="category" id="category" data-old="<?=esc(old_value('category'))?>">
 				  <!-- Options will be populated dynamically based on transaction type -->
 				</select>
+				<div class="agency-choice-badges" id="categoryChoiceBadges" role="group" aria-label="Select category"></div>
 
 				<?php if(!empty($errors['category'])):?>
 				  <small class="text-danger"><?=$errors['category']?></small>
@@ -164,7 +168,7 @@
 
 			<div class="mb-3 col-md-12 col-lg-6 id_type d-none">
 			  <label for="id_type" class="form-label">ID type</label>
-			  <select class="form-select id_type" name="id_type">
+			  <select class="form-select id_type choice-badge-select" name="id_type">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('id_type','Ghana card')?> value="Ghana card">Ghana card</option>
 				  <option <?=old_select('id_type','Voter ID')?> value="Voter ID">Voter ID</option>
@@ -225,6 +229,12 @@
 			  	<div id="currencySymbol" class="input-group-text">GH₵</div>
 			  	<input name="charge" value="<?=old_value('charge')?>" type="text" class="form-control" id="charge" placeholder="GH&cent;0.00">
 			  </div>
+			  <div class="agency-charge-summary" id="agencyChargeSummary" aria-live="polite" aria-atomic="true" hidden>
+                <div class="agency-charge-summary__item"><span>Transaction amount</span><strong id="agencySummaryAmount">GHS 0.00</strong></div>
+                <div class="agency-charge-summary__item"><span>Charge applied</span><strong id="agencySummaryCharge">GHS 0.00</strong></div>
+                <div class="agency-charge-summary__item"><span id="agencySummaryTotalLabel">Total amount including charge</span><strong id="agencySummaryTotal">GHS 0.00</strong></div>
+                <p class="agency-charge-summary__hint">The charge is recorded as commission. Deposit amounts show the net credited after charge.</p>
+			  </div>
 				
 				<?php if(!empty($errors['charge'])):?>
 				  <small class="text-danger"><?=$errors['charge']?></small>
@@ -276,7 +286,7 @@
 
 			<div class="mb-3 col-md-12 col-lg-6 transaction_status d-none">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status">
+			  <select class="form-select transaction_status choice-badge-select" name="transaction_status">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 				  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>
@@ -375,6 +385,73 @@
 	const categorySelect = document.getElementById('category');
 	const sourceSelect = document.getElementById('network');
 	const categoryDiv = document.querySelector('.category');
+	const categoryBadgeList = document.getElementById('categoryChoiceBadges');
+	const sourceBadgeList = document.getElementById('networkChoiceBadges');
+	const amountField = document.getElementById('amount');
+	const chargeField = document.getElementById('charge');
+	const chargeSummary = document.getElementById('agencyChargeSummary');
+	const summaryAmount = document.getElementById('agencySummaryAmount');
+	const summaryCharge = document.getElementById('agencySummaryCharge');
+	const summaryTotal = document.getElementById('agencySummaryTotal');
+	const summaryTotalLabel = document.getElementById('agencySummaryTotalLabel');
+
+	function renderSelectBadges(select, container) {
+		container.replaceChildren();
+		const options = Array.from(select.options).filter(option => option.value !== '');
+		if (!options.length) {
+			const placeholder = document.createElement('span');
+			placeholder.className = 'text-muted small';
+			placeholder.textContent = 'Select a transaction type first.';
+			container.appendChild(placeholder);
+			return;
+		}
+
+		options.forEach(option => {
+			const badge = document.createElement('button');
+			badge.type = 'button';
+			badge.className = 'agency-choice-badge';
+			badge.textContent = option.textContent;
+			badge.dataset.choiceValue = option.value;
+			badge.setAttribute('aria-pressed', String(option.value === select.value));
+			badge.addEventListener('click', () => {
+				select.value = option.value;
+				select.dispatchEvent(new Event('change', { bubbles: true }));
+				container.querySelectorAll('.agency-choice-badge').forEach(choice => {
+					choice.setAttribute('aria-pressed', String(choice.dataset.choiceValue === select.value));
+				});
+			});
+			container.appendChild(badge);
+		});
+	}
+
+	function updateAmountChargeSummary() {
+		const amountWrapper = amountField ? amountField.closest('.amount') : null;
+		if (!amountWrapper || amountWrapper.classList.contains('d-none')) {
+			chargeSummary.hidden = true;
+			return;
+		}
+
+		const transactionTypeValue = transactionType.value.toLowerCase();
+		if (transactionTypeValue.includes('withdrawal') || transactionTypeValue.includes('interbank') || transactionTypeValue.includes('gip')) {
+			chargeSummary.hidden = true;
+			return;
+		}
+
+		const amount = Number.parseFloat(amountField.value) || 0;
+		const charge = Number.parseFloat(chargeField.value) || 0;
+		if (amount <= 0 && charge <= 0) {
+			chargeSummary.hidden = true;
+			return;
+		}
+
+		const formatGhs = value => `GHS ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+		const isDeposit = transactionTypeValue === 'deposit';
+		summaryAmount.textContent = formatGhs(amount);
+		summaryCharge.textContent = formatGhs(charge);
+		summaryTotalLabel.textContent = isDeposit ? 'Amount credited after charge' : 'Total amount including charge';
+		summaryTotal.textContent = formatGhs(isDeposit ? Math.max(0, amount - charge) : amount + charge);
+		chargeSummary.hidden = false;
+	}
 
 	function updateCategoryOptions() {
 		const transactionTypeValue = transactionType.value;
@@ -399,6 +476,7 @@
 		if (oldCategory) {
 			categorySelect.value = oldCategory;
 		}
+		renderSelectBadges(categorySelect, categoryBadgeList);
 		showFields();
 	}
 
@@ -420,6 +498,7 @@
 		if (oldNetwork) {
 			sourceSelect.value = oldNetwork;
 		}
+		renderSelectBadges(sourceSelect, sourceBadgeList);
 		showFields();
 	}
 
@@ -545,6 +624,7 @@
 			nok_phone.classList.add('d-none');
 			nok_relation.classList.add('d-none');
 		}
+		updateAmountChargeSummary();
 	}
 
 	function calculateCharge() {
@@ -563,6 +643,7 @@
 			chargeInput.value = (0 * 0.01).toFixed(2); // Clear charge if amount is not a valid number
 				chargeInput.innerText += chargeInput.value;
 		}
+		updateAmountChargeSummary();
 	}
 
 	function calculateBalance() {
@@ -609,9 +690,11 @@
 	transactionType.addEventListener("change", updateCategoryOptions);
 	transactionType.addEventListener("change", updateSourceOptions);
 	categorySelect.addEventListener("change", showFields);
+	sourceSelect.addEventListener("change", showFields);
 	transactionType.addEventListener("change", calculateBalance);
-	document.getElementById('amount').addEventListener('input', calculateBalance);
+	amountField.addEventListener('input', calculateBalance);
 	document.getElementById('balance_before').addEventListener('input', calculateBalance);
 	document.getElementById('charge').addEventListener('input', calculateBalance);
+	chargeField.addEventListener('input', updateAmountChargeSummary);
 </script>
 

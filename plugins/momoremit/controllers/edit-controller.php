@@ -181,6 +181,25 @@ if (!$wasApproved && strcasecmp($txTypeNorm, 'Cash in') === 0) {
     foreach (['amount_load','amount_sendable','amount_payable','cash_received_amount','change_required','amount','balance_after','charge'] as $moneyField) {
         $postdata[$moneyField] = $normalizeMoneyField($postdata[$moneyField] ?? ($row->{$moneyField} ?? ''));
     }
+    $networkNorm = strtolower(trim((string)($postdata['network'] ?? ($row->network ?? ''))));
+    if (
+        strtolower($simTypeNorm) === 'bank'
+        && $networkNorm === 'ghanapay'
+        && function_exists('dynamic_charge_calculate')
+    ) {
+        $cashInAmount = (float)($postdata['amount_load'] ?? $postdata['amount'] ?? 0);
+        $bankName = trim((string)($postdata['bank_name'] ?? ($row->bank_name ?? '')));
+        $dynamicCharge = dynamic_charge_calculate([
+            'commission_type' => 'MOMOREMIT GHANAPAY CASHIN',
+            'transaction_type' => $txTypeNorm,
+            'network' => $postdata['network'] ?? ($row->network ?? ''),
+            'source_option' => $bankName !== '' ? 'Bank' : 'Sim Type',
+            'source_value' => $bankName !== '' ? $bankName : ($postdata['sim_type'] ?? ($row->sim_type ?? '')),
+        ], $cashInAmount);
+        $postdata['charge'] = $normalizeMoneyField($dynamicCharge);
+        $postdata['amount_payable'] = $normalizeMoneyField($cashInAmount + $dynamicCharge);
+        $postdata['amount_sendable'] = $normalizeMoneyField($cashInAmount);
+    }
     if (function_exists('momoremits_apply_merchant_cashin_sending_amounts')) {
         $postdata = momoremits_apply_merchant_cashin_sending_amounts($postdata);
     }
@@ -256,6 +275,9 @@ $postdata['updated_by'] = $user_id;
 
 $cashdrawerClosingBalance = null;
 $ecashClosingBalance = null;
+$approvedEcashChannelKey = null;
+$approvedEcashSharedAccountKey = null;
+$approvedEcashOpeningBalance = 0.0;
 $dbMutation = new \Core\Database;
 
 try {
@@ -299,39 +321,68 @@ try {
                     ? momoremits_cashin_ecash_debit_amount($postdata)
                     : $amountSendableApproval;
 
-                $resolvedKey = momoremits_resolve_ecash_channel_key(
-                    $drawer_id,
-                    $drawerUserId,
-                    $network,
-                    (string)($postdata['bank_name'] ?? ($row->bank_name ?? '')),
-                    (string)($postdata['sim_type'] ?? ($row->sim_type ?? ''))
-                );
-                if ($resolvedKey === null) {
-                    throw new \RuntimeException('Current balance for this e-cash/bank channel could not be found.');
+                $bankName = (string)($postdata['bank_name'] ?? ($row->bank_name ?? ''));
+                $simType = (string)($postdata['sim_type'] ?? ($row->sim_type ?? ''));
+                $sharedBankBalance = strcasecmp($network, 'GHANAPAY') === 0
+                    && strcasecmp(trim($simType), 'Bank') === 0
+                    ? momoremits_shared_bank_balance($bankName)
+                    : null;
+                if (!empty($sharedBankBalance)) {
+                    $approvedEcashSharedAccountKey = (string)($sharedBankBalance['account_key'] ?? '');
+                    $resolvedKey = momoremits_ecash_channel_candidates($network, $bankName, $simType)[0]
+                        ?? ('ECASH_' . $approvedEcashSharedAccountKey);
+                    $currentBalance = (float)($sharedBankBalance['closing_balance'] ?? 0);
+                } else {
+                    $resolvedKey = momoremits_resolve_ecash_channel_key(
+                        $drawer_id,
+                        $drawerUserId,
+                        $network,
+                        $bankName,
+                        $simType
+                    );
+                    $dbBalGuard = new \Core\Database;
+                    $rows = [];
+                    if ($resolvedKey !== null) {
+                        $rows = $dbBalGuard->query(
+                            "SELECT closing_balance
+                             FROM drawer_balances
+                             WHERE drawer_id = :drawer_id
+                               AND user_id = :user_id
+                               AND channel_type = 'ecash'
+                               AND channel_key = :channel_key
+                             ORDER BY id DESC
+                             LIMIT 1",
+                            [
+                                'drawer_id' => $drawer_id,
+                                'user_id' => $drawerUserId,
+                                'channel_key' => $resolvedKey,
+                            ]
+                        );
+                    }
+
+                    if (empty($rows)
+                        && strcasecmp($network, 'GHANAPAY') === 0
+                        && strcasecmp(trim($simType), 'Bank') === 0) {
+                        $priorBalance = momoremits_find_prior_ecash_balance(
+                            $drawer_id,
+                            $drawerUserId,
+                            momoremits_ecash_channel_candidates($network, $bankName, $simType)
+                        );
+                        if (!empty($priorBalance)) {
+                            $resolvedKey = (string)($priorBalance['channel_key'] ?? '');
+                            $approvedEcashOpeningBalance = (float)($priorBalance['closing_balance'] ?? 0);
+                            $rows = [(object)['closing_balance' => $approvedEcashOpeningBalance]];
+                        }
+                    }
+
+                    if (empty($rows)) {
+                        throw new \RuntimeException('No current or prior cashdrawer balance was found for channel ' . ($resolvedKey ?? 'selected e-cash/bank') . '.');
+                    }
+                    $currentBalance = (float)($rows[0]->closing_balance ?? 0);
                 }
 
-                $dbBalGuard = new \Core\Database;
-                $rows = $dbBalGuard->query(
-                    "SELECT closing_balance
-                     FROM drawer_balances
-                     WHERE drawer_id = :drawer_id
-                       AND user_id = :user_id
-                       AND channel_type = 'ecash'
-                       AND channel_key = :channel_key
-                     ORDER BY id DESC
-                     LIMIT 1",
-                    [
-                        'drawer_id' => $drawer_id,
-                        'user_id' => $drawerUserId,
-                        'channel_key' => $resolvedKey,
-                    ]
-                );
-
-                if (empty($rows)) {
-                    throw new \RuntimeException('Current balance for channel ' . $resolvedKey . ' could not be found.');
-                }
-
-                $currentBalance = (float)($rows[0]->closing_balance ?? 0);
+                $approvedEcashOpeningBalance = $currentBalance;
+                $approvedEcashChannelKey = $resolvedKey;
                 $projected = $currentBalance - $ecashDebitRequired;
                 $postdata['balance_after'] = number_format($projected, 2, '.', '');
                 $postdata['amount_sendable'] = number_format($amountSendableApproval, 2, '.', '');
@@ -434,14 +485,24 @@ try {
                         ? momoremits_cashin_ecash_debit_amount($postdata)
                         : (float)($postdata['amount_sendable'] ?? ($row->amount_sendable ?? 0));
                     if ($ecashAmount > 0 && !empty($network)) {
-                        $channelKey = momoremits_resolve_ecash_channel_key(
+                        $channelKey = $approvedEcashChannelKey ?? momoremits_resolve_ecash_channel_key(
                             $drawer_id,
                             $drawerUserId,
                             (string)$network,
                             (string)($postdata['bank_name'] ?? ($row->bank_name ?? '')),
                             (string)($postdata['sim_type'] ?? ($row->sim_type ?? ''))
                         );
-                        if ($channelKey !== null) {
+                        if ($approvedEcashSharedAccountKey !== null) {
+                            $ecashClosingBalance = momoremits_record_shared_ecash_debit(
+                                $drawer_id,
+                                $drawerUserId,
+                                (string)$channelKey,
+                                $approvedEcashOpeningBalance,
+                                $ecashAmount,
+                                (int)$row->id,
+                                (string)$postdata['transaction_status']
+                            );
+                        } elseif ($channelKey !== null) {
                             $rowsBal = $dbBal->query(
                                 "SELECT *
                                  FROM drawer_balances
@@ -459,7 +520,7 @@ try {
 
                             $now = date('Y-m-d H:i:s');
                             if (empty($rowsBal)) {
-                                $opening = 0.0;
+                                $opening = $approvedEcashOpeningBalance;
                                 $credit = 0.0;
                                 $debit = $ecashAmount;
                                 $closing = $opening - $debit;
@@ -514,6 +575,9 @@ try {
                     }
                 }
             } catch (\Throwable $e) {
+                if ($approvedEcashSharedAccountKey !== null) {
+                    throw $e;
+                }
                 // Keep legacy behavior: do not block if aggregate e-cash row update fails.
             }
         }

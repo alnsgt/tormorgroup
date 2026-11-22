@@ -283,18 +283,20 @@ if(!empty($row))
 			$txTypeRawForCharge = trim((string)($postdata['transaction_type'] ?? $row->transaction_type ?? ''));
 			$txTypeLowerForCharge = strtolower($txTypeRawForCharge);
 			if (strpos($txTypeLowerForCharge, 'interbank') !== false || strpos($txTypeLowerForCharge, 'gip') !== false) {
-				$charge = (float)($postdata['charge'] ?? 0);
-				if ($charge > 0) {
-					$cents = (int)round($charge * 100);
-					$baseCents = (int)(floor($cents / 100) * 100);
-					$fracCents = $cents - $baseCents;
-					if ($fracCents > 0 && $fracCents < 50) {
-						$cents = $baseCents + 50;
-					} elseif ($fracCents > 50 && $fracCents < 100) {
-						$cents = $baseCents + 100;
-					}
-					$postdata['charge'] = number_format((float)($cents / 100), 2, '.', '');
-				}
+				$interbankLoad = (float)($postdata['amount'] ?? $row->amount ?? 0);
+				$charge = function_exists('dynamic_charge_calculate')
+					? dynamic_charge_calculate([
+						'commission_type' => 'AGENCYBANKING INTERBANK',
+						'transaction_type' => $txTypeRawForCharge,
+						'network' => $postdata['network'] ?? ($row->network ?? ''),
+						'source_option' => $postdata['sof_option'] ?? ($row->sof_option ?? ''),
+						'source_value' => $postdata['destination_bank'] ?? ($row->destination_bank ?? ($postdata['cash_source'] ?? ($row->cash_source ?? ''))),
+					], $interbankLoad)
+					: (float)($postdata['charge'] ?? 0);
+				$charge = max(0.0, (float)$charge);
+				$charge = $charge > 0 ? ceil($charge * 10 - 1e-9) / 10 : 0;
+				$postdata['charge'] = number_format($charge, 2, '.', '');
+				$postdata['amount_payable'] = number_format($interbankLoad + (float)($postdata['charge'] ?? 0), 2, '.', '');
 			}
 			if (!array_key_exists('charging_type', $postdata) || $postdata['charging_type'] === null || $postdata['charging_type'] === '') {
 				$postdata['charging_type'] = $row->charging_type ?? null;
@@ -319,7 +321,8 @@ if(!empty($row))
 			$txTypeRaw = trim((string)($postdata['transaction_type'] ?? $row->transaction_type ?? ''));
 			$networkRaw = trim((string)($postdata['network'] ?? $row->network ?? ''));
 			$isWithdrawal = (stripos($txTypeRaw, 'withdrawal') !== false);
-			$isGhqrCitWithdrawal = in_array(strtoupper(trim((string)$networkRaw)), ['GHQR', 'GCB'], true) && (strcasecmp($txTypeRaw, 'Withdrawal (CIT)') === 0);
+			$withdrawalProvider = strtoupper(trim((string)$networkRaw));
+			$isGhqrCitWithdrawal = in_array($withdrawalProvider, ['GHQR', 'GCB', 'FIDELITY BANK', 'FIDELITY'], true) && (strcasecmp($txTypeRaw, 'Withdrawal (CIT)') === 0);
 			if ($isWithdrawal && !$willBeDeclinedOrRejected) {
 				$postdata['transaction_status'] = 'Approved';
 				if (!$isGhqrCitWithdrawal) {
@@ -332,17 +335,45 @@ if(!empty($row))
 				}
 			}
 
-			// GHQR Withdrawal (CIT): cap both plus/minus charge at GH₵20
-			if ($isGhqrCitWithdrawal) {
+			if ($isGhqrCitWithdrawal && !$willBeDeclinedOrRejected) {
 				$withdrawn = (float)($postdata['amount_withdrawn'] ?? $row->amount_withdrawn ?? 0);
-				$payable = (float)($postdata['amount_payable'] ?? $row->amount_payable ?? 0);
-				$charge = (float)($postdata['charge'] ?? $row->charge ?? 0);
-				$baseForCap = max($withdrawn, $payable);
-				if ($baseForCap > 2000 && $charge > 20) {
-					$charge = 20;
-					$postdata['charge'] = number_format($charge, 2, '.', '');
-					if ($withdrawn > 0) {
-						$postdata['amount_payable'] = number_format(max(0, $withdrawn - $charge), 2, '.', '');
+				$chargingType = strtolower(trim((string)($postdata['charging_type'] ?? 'minus')));
+				$chargingType = in_array($chargingType, ['plus', 'minus'], true) ? $chargingType : 'minus';
+				$postdata['charging_type'] = $chargingType;
+				$sourceOption = trim((string)($postdata['sof_option'] ?? $row->sof_option ?? ''));
+				$sourceValue = trim((string)($postdata['cash_source'] ?? $row->cash_source ?? ''));
+				if ($sourceOption === '' && in_array($withdrawalProvider, ['GCB', 'FIDELITY BANK', 'FIDELITY'], true)) {
+					$sourceOption = 'Bank';
+				}
+				if ($sourceValue === '' && $withdrawalProvider === 'GCB') {
+					$sourceValue = 'GCB';
+				} elseif ($sourceValue === '' && in_array($withdrawalProvider, ['FIDELITY BANK', 'FIDELITY'], true)) {
+					$sourceValue = 'Fidelity';
+				}
+				$charge = function_exists('dynamic_charge_calculate')
+					? dynamic_charge_calculate([
+						'commission_type' => $withdrawalProvider === 'GHQR'
+							? 'AGENCYBANKING WITHDRAWAL CIT GHQR'
+							: 'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY',
+						'transaction_type' => $txTypeRaw,
+						'network' => $networkRaw,
+						'source_option' => $sourceOption,
+						'source_value' => $sourceValue,
+					], $withdrawn)
+					: (float)($postdata['charge'] ?? $row->charge ?? 0);
+				$charge = ceil($charge * 10 - 1e-9) / 10;
+				$postdata['charge'] = number_format($charge, 2, '.', '');
+				if ($withdrawn > 0) {
+					$payable = $chargingType === 'plus'
+						? $withdrawn
+						: max(0, $withdrawn - $charge);
+					$postdata['amount_payable'] = number_format($payable, 2, '.', '');
+					$cashPaidOut = (float)($postdata['amount'] ?? $row->amount ?? 0);
+					if (abs($cashPaidOut - $payable) > 0.01) {
+						$agencybanking->errors['amount'] = 'Amount paid out must match the amount after applying the charge.';
+						message_fail($agencybanking->errors['amount']);
+						set_value('errors', $agencybanking->errors);
+						return;
 					}
 				}
 			}
@@ -390,7 +421,6 @@ if(!empty($row))
 			}
 
 			$chargeValue = (float)($postdata['charge'] ?? 0);
-			$isInterbankOrGipCharge = strpos($txTypeLowerForCharge, 'interbank') !== false || strpos($txTypeLowerForCharge, 'gip') !== false;
 			try {
 				$commissionDb = new \Core\Database;
 				$commissionDescription = 'AGENCYBANKING CHARGE | ' . ($networkLabel ?? '') . ' | ' . ($transactionTypeLabel ?? '') . ' | ID ' . ($row->id ?? '');
@@ -403,7 +433,7 @@ if(!empty($row))
 					]
 				);
 
-				if ($chargeValue > 0 && !$isInterbankOrGipCharge) {
+				if ($chargeValue > 0) {
 					$commissionInsert = [
 						'date_received' => $postdata['date_updated'] ?? date('Y-m-d H:i:s'),
 						'colletion_period' => 'INSTANT',

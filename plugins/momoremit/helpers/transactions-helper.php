@@ -716,6 +716,14 @@ if (!function_exists('momoremits_ecash_channel_candidates')) {
                 'BANK_' . $bankNormalized,
                 $bankNormalized,
             ];
+            $bankAlias = preg_replace('/_BANK$/', '', $bankNormalized);
+            if ($bankAlias !== $bankNormalized) {
+                $bankCandidates = array_merge($bankCandidates, [
+                    'ECASH_' . $bankAlias,
+                    'BANK_' . $bankAlias,
+                    $bankAlias,
+                ]);
+            }
         }
 
         if ($isMomoPay) {
@@ -877,6 +885,165 @@ if (!function_exists('momoremits_resolve_ecash_channel_key')) {
         }
 
         return null;
+    }
+}
+
+if (!function_exists('momoremits_find_prior_ecash_balance')) {
+    function momoremits_find_prior_ecash_balance(int $drawerId, int $drawerUserId, array $channelKeys): ?array
+    {
+        if ($drawerId <= 0 || $drawerUserId <= 0 || empty($channelKeys) || !momoremits_table_exists('drawer_balances')) {
+            return null;
+        }
+
+        $keys = array_values(array_unique(array_filter(array_map(
+            static fn($key): string => strtoupper(trim((string)$key)),
+            $channelKeys
+        ))));
+        if (empty($keys)) {
+            return null;
+        }
+
+        $params = [
+            'user_id' => $drawerUserId,
+            'active_drawer_id' => $drawerId,
+        ];
+        $keyPlaceholders = [];
+        foreach ($keys as $index => $key) {
+            $placeholder = 'channel_key_' . $index;
+            $keyPlaceholders[] = ':' . $placeholder;
+            $params[$placeholder] = $key;
+        }
+
+        $db = new Database();
+        $rows = $db->query(
+            "SELECT db.channel_key, db.opening_balance, db.credit, db.debit, db.closing_balance
+             FROM drawer_balances AS db
+             INNER JOIN cashdrawers AS cd ON cd.id = db.drawer_id
+             WHERE cd.user_id = :user_id
+               AND db.user_id = :user_id
+               AND db.channel_type = 'ecash'
+               AND cd.id < :active_drawer_id
+               AND UPPER(db.channel_key) IN (" . implode(', ', $keyPlaceholders) . ")
+             ORDER BY cd.id DESC, db.id DESC
+             LIMIT 1",
+            $params
+        );
+        if (!empty($db->has_error)) {
+            throw new \RuntimeException(momoremits_db_error_message($db, 'Unable to load the prior e-cash balance.'));
+        }
+
+        if (empty($rows)) {
+            return null;
+        }
+
+        $row = $rows[0];
+        $closingBalance = $row->closing_balance ?? (
+            (float)($row->opening_balance ?? 0)
+            + (float)($row->credit ?? 0)
+            - (float)($row->debit ?? 0)
+        );
+
+        return [
+            'channel_key' => (string)($row->channel_key ?? ''),
+            'closing_balance' => (float)$closingBalance,
+        ];
+    }
+}
+
+if (!function_exists('momoremits_shared_bank_balance')) {
+    function momoremits_shared_bank_balance(string $bankName): ?array
+    {
+        if (!function_exists('users_manager_normalize_shared_account_key')) {
+            return null;
+        }
+
+        $accountKey = users_manager_normalize_shared_account_key($bankName);
+        if ($accountKey === null) {
+            return null;
+        }
+        if (!function_exists('users_manager_fetch_shared_account_balances')) {
+            throw new \RuntimeException('Shared bank balances are unavailable.');
+        }
+
+        $balances = users_manager_fetch_shared_account_balances();
+        $balance = $balances[$accountKey] ?? null;
+        if (!is_array($balance)) {
+            throw new \RuntimeException('Unable to load the shared balance for ' . $bankName . '.');
+        }
+
+        return [
+            'account_key' => $accountKey,
+            'closing_balance' => (float)($balance['closing_balance'] ?? 0),
+        ];
+    }
+}
+
+if (!function_exists('momoremits_record_shared_ecash_debit')) {
+    function momoremits_record_shared_ecash_debit(
+        int $drawerId,
+        int $drawerUserId,
+        string $channelKey,
+        float $openingBalance,
+        float $amount,
+        int $transId,
+        string $transStatus
+    ): float {
+        if ($drawerId <= 0 || $drawerUserId <= 0 || $channelKey === '' || $amount <= 0) {
+            throw new \InvalidArgumentException('A valid drawer, shared bank channel, and debit amount are required.');
+        }
+
+        $targets = [['drawer_id' => $drawerId, 'drawer_user_id' => $drawerUserId]];
+        if (function_exists('Agencybankings\\agency_fetch_admin_manager_drawers_today')) {
+            $targets = array_merge($targets, \Agencybankings\agency_fetch_admin_manager_drawers_today());
+        }
+
+        $uniqueTargets = [];
+        foreach ($targets as $target) {
+            $targetDrawerId = (int)($target['drawer_id'] ?? 0);
+            $targetUserId = (int)($target['drawer_user_id'] ?? 0);
+            if ($targetDrawerId > 0 && $targetUserId > 0) {
+                $uniqueTargets[$targetDrawerId . ':' . $targetUserId] = [
+                    'drawer_id' => $targetDrawerId,
+                    'user_id' => $targetUserId,
+                ];
+            }
+        }
+
+        if (empty($uniqueTargets)) {
+            throw new \RuntimeException('No cashdrawer is available for the shared bank balance update.');
+        }
+
+        $closingBalance = round($openingBalance - $amount, 2);
+        $db = new Database();
+        if (!$db->table_exists(['drawer_balances'])) {
+            throw new \RuntimeException('Drawer balances are not available for the shared bank update.');
+        }
+
+        $now = date('Y-m-d H:i:s');
+        foreach ($uniqueTargets as $target) {
+            $db->query(
+                "INSERT INTO drawer_balances
+                 (drawer_id, user_id, channel_type, channel_key, opening_balance, credit, debit, closing_balance, date_created, trans_id, trans_status)
+                 VALUES
+                 (:drawer_id, :user_id, 'ecash', :channel_key, :opening, 0, :debit, :closing, :date_created, :trans_id, :trans_status)",
+                [
+                    'drawer_id' => $target['drawer_id'],
+                    'user_id' => $target['user_id'],
+                    'channel_key' => $channelKey,
+                    'opening' => $openingBalance,
+                    'debit' => $amount,
+                    'closing' => $closingBalance,
+                    'date_created' => $now,
+                    'trans_id' => $transId,
+                    'trans_status' => $transStatus,
+                ]
+            );
+            if (!empty($db->has_error)) {
+                throw new \RuntimeException(momoremits_db_error_message($db, 'Unable to save the shared bank balance update.'));
+            }
+        }
+
+        return $closingBalance;
     }
 }
 

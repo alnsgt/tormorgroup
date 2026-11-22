@@ -190,45 +190,6 @@ if(!function_exists('agencybanking_runtime_marker_path')){
  agencybanking_ensure_limit_table();
 
 
- if(!function_exists('agencybanking_cleanup_interbank_charge_commissions')){
- 	function agencybanking_cleanup_interbank_charge_commissions(): void
- 	{
- 		static $cleaned = false;
- 		if ($cleaned) {
- 			return;
- 		}
- 		$cleaned = true;
-		$marker = agencybanking_runtime_marker_path('agencybanking_interbank_cleanup_20260427.done');
-		if(file_exists($marker)){
-			return;
-		}
- 		try {
- 			$db = new \Core\Database;
- 			if (!$db->table_exists(['commissions'])) {
- 				@file_put_contents($marker, '1');
- 				return;
- 			}
- 			$db->query(
- 				"DELETE c
- 				 FROM commissions c
- 				 INNER JOIN agencybankings a ON c.description LIKE CONCAT('%| ID ', a.id)
- 				 WHERE c.commission_type = :commission_type
- 				   AND (LOWER(a.transaction_type) LIKE :interbank OR LOWER(a.transaction_type) LIKE :gip)",
- 				[
- 					'commission_type' => 'AGENCYBANKING CHARGE',
- 					'interbank' => '%interbank%',
- 					'gip' => '%gip%',
- 				]
- 			);
- 			@file_put_contents($marker, '1');
- 		} catch (\Throwable $e) {
- 			error_log('AGENCYBANKING INTERBANK CHARGE COMMISSION CLEANUP FAILED: ' . $e->getMessage());
- 		}
- 	}
- }
-
- agencybanking_cleanup_interbank_charge_commissions();
-
 if(!function_exists('agencybanking_build_filters')){
 	function agencybanking_build_filters(array $filters, bool $canViewAll, int $currentUserId, array &$params): string
 	{

@@ -718,7 +718,11 @@ $agentOptions = $users ?? [];
 	    				<td class="d-none d-lg-table-cell">${formatDate(row.date_created)}</td>
 	    				<td class="d-none d-lg-table-cell"><a style="text-decoration: none;" href="${viewUrl}">${row.network || ''} (${row.category || ''})</a></td>
 	    				<td class="d-none d-lg-table-cell">${row.phone || ''}</td>
-	    				<td class="d-none d-lg-table-cell">${Number(row.amount || 0).toFixed(2)}</td>
+						<td class="d-none d-lg-table-cell">
+							<div>${Number(row.amount || 0).toFixed(2)}</div>
+							<small class="text-muted d-block">Charge/commission: ${Number(row.commission || 0).toFixed(2)}</small>
+							${Number(row.amount_to_send || 0) !== Number(row.amount || 0) ? `<small class="text-muted d-block">Net sent: ${Number(row.amount_to_send || 0).toFixed(2)}</small>` : ''}
+						</td>
 	    				<td class="d-none d-lg-table-cell">${Number(row.balance_after || 0).toFixed(2)}</td>
 	    				<td class="d-none d-lg-table-cell"><span class="${badgeClass}">${row.transaction_status || 'N/A'}</span>${reasonHtml(row.rejection_reason)}</td>
 	    				<td class="d-none d-lg-table-cell"><span><img src="${row.agent?.image || ''}" style="width: 30px; height: 30px; object-fit: cover; border-radius: 50%;"></span> ${row.agent?.name || ''}</td>
@@ -734,6 +738,8 @@ $agentOptions = $users ?? [];
 	    						<div>
 	    							<small class="text-muted d-block">Amount</small>
 	    							<span class="fw-semibold">${Number(row.amount || 0).toFixed(2)}</span>
+							<small class="text-muted d-block">Charge/commission: ${Number(row.commission || 0).toFixed(2)}</small>
+							${Number(row.amount_to_send || 0) !== Number(row.amount || 0) ? `<small class="text-muted d-block">Net sent: ${Number(row.amount_to_send || 0).toFixed(2)}</small>` : ''}
 	    						</div>
 	    						<div>
 	    							<small class="text-muted d-block">Balance After</small>

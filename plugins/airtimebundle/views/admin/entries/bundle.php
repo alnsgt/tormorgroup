@@ -1,6 +1,12 @@
 <?php
 $mtnDataBundleCharge = (new \Settings\CommissionRate)->first(['commission_type' => 'MTN DATA BUNDLE']);
-$mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50);
+$mtnDataBundleChargeRate = (float)($mtnDataBundleCharge->commission_rate ?? 0.50);
+$mtnDataBundleChargeType = strtolower((string)($mtnDataBundleCharge->charge_type ?? 'flat'));
+$mtnDataBundleStartingAmount = (float)($mtnDataBundleCharge->starting_amount ?? 0);
+$mtnDataBundleCapValue = (float)($mtnDataBundleCharge->cap_value ?? 0);
+$mtnDataBundleIsCapped = !empty($mtnDataBundleCharge->is_capped);
+$mtnDataBundleChargeEnabled = !empty($mtnDataBundleCharge->status);
+$mtnDataBundleInitialCharge = 0;
 ?>
 <?php if(user_can('add_momoremit')):?>
 	<style>
@@ -20,6 +26,48 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 		.form-label {
 			color: gray;
 			font-size: 12px;
+		}
+		.bundle-choice-group {
+			display: flex;
+			flex-wrap: wrap;
+			gap: .4rem;
+			min-height: 2rem;
+		}
+		.bundle-choice-badge {
+			border: 1px solid var(--bs-border-color, #dee2e6);
+			border-radius: 999px;
+			padding: .28rem .7rem;
+			background: var(--bs-body-bg, #fff);
+			color: var(--bs-secondary-color, #64748b);
+			font-size: .76rem;
+			font-weight: 650;
+			line-height: 1.3;
+			transition: color .15s ease, background-color .15s ease, border-color .15s ease, transform .15s ease;
+		}
+		.bundle-choice-badge:hover {
+			transform: translateY(-1px);
+			border-color: var(--bs-primary, #0d6efd);
+		}
+		.bundle-choice-badge.is-selected,
+		.bundle-choice-badge[aria-pressed="true"] {
+			color: #fff !important;
+			background: #0d6efd !important;
+			border: 2px solid #084298 !important;
+			box-shadow: 0 0 0 .2rem rgba(13, 110, 253, .24);
+		}
+		.bundle-choice-badge:focus-visible {
+			outline: 3px solid rgba(var(--bs-primary-rgb, 13, 110, 253), .3);
+			outline-offset: 2px;
+		}
+		.bundle-choice-empty {
+			align-self: center;
+			color: var(--bs-secondary-color, #64748b);
+			font-size: .76rem;
+		}
+		.bundle-charge-summary {
+			border: 1px solid rgba(var(--bs-primary-rgb, 13, 110, 253), .18);
+			border-radius: .9rem;
+			background: rgba(var(--bs-primary-rgb, 13, 110, 253), .045);
 		}
 	</style>
 	<form method="post" enctype="multipart/form-data" class="mb-5">
@@ -51,12 +99,8 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
  
 		<div class="col-md-12">
       <label for="network" class="form-label">Network</label>
-      <select class="form-select" name="network" id="network">
-        <option value="" >---Select Category---</option>
-        <option <?=old_select('network','MTN')?> value="MTN" >MTN</option>
-        <option <?=old_select('network','AT')?> value="AT" >AT</option>
-        <option <?=old_select('network','TELECEL')?> value="TELECEL" >TELECEL</option>
-      </select>
+      <input type="hidden" name="network" id="network" value="<?=htmlspecialchars((string)old_value('network'), ENT_QUOTES, 'UTF-8')?>">
+	  <div class="bundle-choice-group" id="networkBadges" role="group" aria-label="Choose network"></div>
 	  <input type="hidden" id="oldNetwork" value="<?=htmlspecialchars((string)old_value('network'), ENT_QUOTES, 'UTF-8')?>">
       <?php if(!empty($errors['network'])):?>
         <small class="text-danger"><?=$errors['network']?></small>
@@ -65,9 +109,8 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 
     <div class="col-md-12">
       <label for="category" class="form-label">Category</label>
-      <select class="form-select" id="category" name="category">
-        <option value="" >---Select Category---</option>
-      </select>
+      <input type="hidden" id="category" name="category" value="<?=htmlspecialchars((string)old_value('category'), ENT_QUOTES, 'UTF-8')?>">
+	  <div class="bundle-choice-group" id="categoryBadges" role="group" aria-label="Choose data category"></div>
 	  <input type="hidden" id="oldCategory" value="<?=htmlspecialchars((string)old_value('category'), ENT_QUOTES, 'UTF-8')?>">
       <?php if(!empty($errors['category'])):?>
         <small class="text-danger"><?=$errors['category']?></small>
@@ -104,12 +147,12 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 			<?php endif?>
 
 			<label for="just4u_charge" class="form-label mt-2">Charge</label>
-			<input type="text" class="form-control" id="just4u_charge" name="just4u_charge" value="<?=number_format($mtnDataBundleFlatCharge, 2)?>" readonly>
-			<label for="just4u_payable" class="form-label mt-2">Amount Payable</label>
-			<input type="text" class="form-control" id="just4u_payable" name="just4u_payable" value="<?=number_format(5 + $mtnDataBundleFlatCharge, 2)?>" readonly>
+			<input type="text" class="form-control" id="just4u_charge" name="just4u_charge" value="<?=number_format($mtnDataBundleInitialCharge, 2)?>" readonly>
+			<label for="just4u_payable" class="form-label mt-2">Net sent</label>
+			<input type="text" class="form-control" id="just4u_payable" name="just4u_payable" value="5.00" readonly>
 			<small class="text-muted d-block mt-1" id="just4u_split_hint"></small>
 			<label for="just4u_paid" class="form-label mt-2">Amount Paid</label>
-			<label class="input-group" data-bs-toggle="modal" data-bs-target="#staticBackdrop">
+      <label class="input-group" data-bs-toggle="modal" data-bs-target="#staticBackdrop">
 				<i class="fa-solid fa-calculator input-group-text text-warning"></i>
 				<input type="text" class="form-control" id="just4u_paid" name="just4u_paid" placeholder="Enter amount paid" value="<?=old_value('just4u_paid')?>" readonly>
 				<input type="hidden" id="denos_just4u" name="denos_just4u" value="<?=htmlspecialchars((string)old_value('denos_just4u'), ENT_QUOTES, 'UTF-8')?>" />
@@ -146,28 +189,32 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 			<?php if(!empty($errors['special_amount_load'])):?>
         <small class="text-danger"><?=$errors['special_amount_load']?></small>
       <?php endif?>
-			<label for="just4u_amount_payable" class="form-label mt-2 d-none js-just4u-payable-label">Amount Payable</label>
-			<input name="just4u_amount_payable" value="<?=old_value('just4u_amount_payable')?>" type="text" class="form-control d-none js-just4u-payable-field" id="just4u_amount_payable" placeholder="Amount deducted from e-cash" readonly>
+			<label for="just4u_amount_payable" class="form-label mt-2 d-none js-just4u-payable-label">Net sent</label>
+			<input name="just4u_amount_payable" value="<?=old_value('just4u_amount_payable')?>" type="text" class="form-control d-none js-just4u-payable-field" id="just4u_amount_payable" placeholder="Net amount sent" readonly>
 			<label for="special_amount_paid" class="form-label mt-2">Amount Paid</label>
 			<label class="input-group" data-bs-toggle="modal" data-bs-target="#staticBackdrop">
 				<i class="fa-solid fa-calculator input-group-text text-warning"></i>
 				<input type="text" class="form-control" id="special_amount_paid" name="special_amount_paid" placeholder="Enter amount paid value" value="<?=old_value('special_amount_paid')?>" readonly>
 				<input type="hidden" id="denos_special" name="denos_special" value="<?=htmlspecialchars((string)old_value('denos_special'), ENT_QUOTES, 'UTF-8')?>" />
 			</label>
-			<small class="text-muted d-none js-just4u-fixed-charge-hint">JUST4U deducts Amount Payable from e-cash. Amount paid must match the full entered amount; the configured MTN data bundle charge is recorded as commission.</small>
+			<small class="text-muted d-none js-just4u-fixed-charge-hint">The configured charge is added to the amount paid and recorded as commission; the full load amount is sent.</small>
 			<small class="text-danger js-special-error"></small>
 		</div>
 		
     <div class="col-md-12 generic-amount-field">
-      <label for="amount" class="form-label">Amount</label>
-       		<label class="input-group" data-bs-toggle="modal" data-bs-target="#staticBackdrop"> 
+      <label for="staff_bundle_load" class="form-label">Load amount</label>
+      <input name="staff_bundle_load" value="<?=old_value('staff_bundle_load')?>" type="number" step="0.01" min="0.01" class="form-control" id="staff_bundle_load" placeholder="Enter load amount">
+      <input name="amount" value="<?=old_value('amount')?>" type="hidden" id="amount">
+      <label for="amount_paid" class="form-label mt-2">Amount paid</label>
+      <label class="input-group" data-bs-toggle="modal" data-bs-target="#staticBackdrop">
 			<i class="fa-solid fa-calculator input-group-text text-warning"></i>
-			<input name="amount" value="<?=old_value('amount')?>" type="number" step="0.01" class="form-control" id="amount" placeholder="Enter amount" readonly>
+			<input name="amount_paid" value="<?=old_value('amount_paid')?>" type="text" class="form-control" id="amount_paid" placeholder="Enter amount paid" readonly>
 			<input type="hidden" id="denos" name="denos" value="<?=htmlspecialchars((string)old_value('denos'), ENT_QUOTES, 'UTF-8')?>" />
 		</label>
 		<?php if(!empty($errors['amount'])):?>
 			<small class="text-danger"><?=$errors['amount']?></small>
 		<?php endif?>
+		<small class="text-danger js-generic-bundle-error"></small>
 	</div>
 
 	<div class="col-md-12">
@@ -198,9 +245,32 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 			  <small class="text-danger js-balance-after-error"></small>
     </div>
 
+	<div class="col-md-12">
+		<div class="bundle-charge-summary p-3 d-none" id="bundleChargeSummary" role="status" aria-live="polite">
+			<div class="d-flex justify-content-between gap-3">
+				<span class="text-muted">Load amount</span>
+				<strong id="bundleLoadPreview">GHS 0.00</strong>
+			</div>
+			<div class="d-flex justify-content-between gap-3 mt-1">
+				<span class="text-muted">Charge added to commissions</span>
+				<strong id="bundleChargePreview">GHS 0.00</strong>
+			</div>
+			<div class="d-flex justify-content-between gap-3 mt-1">
+				<span class="fw-semibold">Total amount paid</span>
+				<strong id="bundlePaidTotalPreview">GHS 0.00</strong>
+			</div>
+			<div class="d-flex justify-content-between gap-3 mt-1 pt-2 border-top">
+				<span class="fw-semibold">Net sent</span>
+				<strong class="text-primary" id="bundleNetPreview">GHS 0.00</strong>
+			</div>
+			<small class="text-muted d-block mt-2" id="bundleChargeNote"></small>
+		</div>
+	</div>
+
 		<div class="col-md-12  assigned">
-		  <label for="assigned" class="form-label">Assigned to </label>
-		  <select class="form-select assigned" name="assigned" id="assigned">
+		  <label for="assigned" class="form-label">Assigned to</label>
+		  <div class="bundle-choice-group" id="assignedBadges" role="group" aria-label="Assign transaction to a user"></div>
+		  <select class="assigned d-none" name="assigned" id="assigned" hidden>
 			  <option value="">---Select---</option>
 			  <?php if(!empty($users)):?>
 			  	<?php foreach ($users as $user): ?>				  		
@@ -216,8 +286,9 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 		<?php require plugin_path('views/admin/entries/transaction_image_upload.php'); ?>
 
 		<div class="mb-2 transaction_status ">
-		  <label for="transaction_status" class="form-label">Delivery Status</label>
-		  <select class="form-select transaction_status" name="transaction_status">
+		  <label for="transaction_status" class="form-label">Delivery status</label>
+		  <div class="bundle-choice-group" id="statusBadges" role="group" aria-label="Choose delivery status"></div>
+		  <select class="transaction_status d-none" name="transaction_status" id="transaction_status" hidden>
 			  <option value="">---Select---</option>
 			  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 			  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>
@@ -404,7 +475,27 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 
 <script>
 
-	const mtnDataBundleCharge = <?=json_encode($mtnDataBundleFlatCharge)?>;
+	const mtnDataBundleChargeRate = <?=json_encode($mtnDataBundleChargeRate)?>;
+	const mtnDataBundleChargeType = <?=json_encode($mtnDataBundleChargeType)?>;
+	const mtnDataBundleStartingAmount = <?=json_encode($mtnDataBundleStartingAmount)?>;
+	const mtnDataBundleCapValue = <?=json_encode($mtnDataBundleCapValue)?>;
+	const mtnDataBundleIsCapped = <?=json_encode($mtnDataBundleIsCapped)?>;
+	const mtnDataBundleChargeEnabled = <?=json_encode($mtnDataBundleChargeEnabled)?>;
+	const chargedBundleCategories = ['MTN-DATA', 'MASHUP', 'JUST4U', 'MTN UP2U', '5959', 'ISHARE', 'STAFF BUNDLE'];
+
+	function calculateBundleCharge(amount, network, category) {
+		const loadAmount = Math.max(0, Number(amount) || 0);
+		if (!mtnDataBundleChargeEnabled || String(network || '').toUpperCase() !== 'MTN' || !chargedBundleCategories.includes(category) || loadAmount < mtnDataBundleStartingAmount) {
+			return 0;
+		}
+		let charge = mtnDataBundleChargeType === 'flat'
+			? mtnDataBundleChargeRate
+			: loadAmount * mtnDataBundleChargeRate / 100;
+		if (mtnDataBundleIsCapped) {
+			charge = Math.min(charge, mtnDataBundleCapValue);
+		}
+		return Math.round(Math.max(0, charge) * 100) / 100;
+	}
 
 	const categoryOptions = {
 		
@@ -432,26 +523,82 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 	const transactionType = document.getElementById('transaction_type'); // Corrected ID selection
 	const categorySelect = document.getElementById('category');
 	const networkSelect = document.getElementById('network');
-	const categoryDiv = document.querySelector('.category');
+	const networkBadges = document.getElementById('networkBadges');
+	const categoryBadges = document.getElementById('categoryBadges');
+	const assignedSelect = document.getElementById('assigned');
+	const statusSelect = document.getElementById('transaction_status');
+	const assignedBadges = document.getElementById('assignedBadges');
+	const statusBadges = document.getElementById('statusBadges');
   const saveBtn = document.querySelector('.save');
   saveBtn.classList.add('disabled');
 
-	function updateCategoryOptions() {
-		const networkValue = network.value;
-		categorySelect.innerHTML = ""; // Clear current options
-
-		// Populate options based on selected transaction type
-		if (categoryOptions[networkValue]) {
-			categoryOptions[networkValue].forEach(option => {
-				const opt = document.createElement('option');
-				opt.value = option.value;
-				opt.textContent = option.text;
-				categorySelect.appendChild(opt);
-			});
-		} 
+	function renderChoiceBadges(container, options, selectedValue, choose, emptyText) {
+		container.replaceChildren();
+		if (!options.length) {
+			const prompt = document.createElement('span');
+			prompt.className = 'bundle-choice-empty';
+			prompt.textContent = emptyText;
+			container.appendChild(prompt);
+			return;
+		}
+		options.forEach(option => {
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'bundle-choice-badge';
+			button.textContent = option.text;
+			button.setAttribute('aria-pressed', String(option.value === selectedValue));
+			if (option.value === selectedValue) button.classList.add('is-selected');
+			button.addEventListener('click', () => choose(option.value));
+			container.appendChild(button);
+		});
 	}
 
-	networkSelect.addEventListener("change", updateCategoryOptions);
+	function renderNetworkBadges() {
+		renderChoiceBadges(networkBadges, [
+			{value: 'MTN', text: 'MTN'},
+			{value: 'AT', text: 'AT'},
+			{value: 'TELECEL', text: 'TELECEL'},
+		], networkSelect.value, value => {
+			if (networkSelect.value === value) return;
+			networkSelect.value = value;
+			networkSelect.dispatchEvent(new Event('change', {bubbles: true}));
+		}, 'Choose a network');
+	}
+
+	function updateCategoryOptions(preferredValue = categorySelect.value) {
+		const options = (categoryOptions[networkSelect.value] || []).filter(option => option.value !== '');
+		const selectedValue = options.some(option => option.value === preferredValue) ? preferredValue : '';
+		const valueChanged = categorySelect.value !== selectedValue;
+		categorySelect.value = selectedValue;
+		renderChoiceBadges(categoryBadges, options, selectedValue, value => {
+			if (categorySelect.value === value) return;
+			categorySelect.value = value;
+			updateCategoryOptions(value);
+			categorySelect.dispatchEvent(new Event('change', {bubbles: true}));
+		}, 'Choose a network first');
+		if (valueChanged) {
+			categorySelect.dispatchEvent(new Event('change', {bubbles: true}));
+		}
+	}
+
+	function renderSelectBadges(select, container) {
+		const options = Array.from(select.options)
+			.filter(option => option.value !== '')
+			.map(option => ({value: option.value, text: option.textContent.trim()}));
+		renderChoiceBadges(container, options, select.value, value => {
+			if (select.value === value) return;
+			select.value = value;
+			renderSelectBadges(select, container);
+			select.dispatchEvent(new Event('change', {bubbles: true}));
+		}, 'No options available');
+	}
+
+	networkSelect.addEventListener('change', function() {
+		renderNetworkBadges();
+		updateCategoryOptions('');
+	});
+	assignedSelect.addEventListener('change', () => renderSelectBadges(assignedSelect, assignedBadges));
+	statusSelect.addEventListener('change', () => renderSelectBadges(statusSelect, statusBadges));
 
   document.addEventListener("DOMContentLoaded", function () {
      const countInputs = document.querySelectorAll(".count-input");
@@ -463,6 +610,9 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 	  const resetBtn = document.querySelector('.reset');
 	  const staticBackdropModal = new bootstrap.Modal(document.getElementById('staticBackdrop'));
 	  const amountInput = document.getElementById("amount");
+	  const amountPaidInput = document.getElementById('amount_paid');
+	  const staffBundleLoadInput = document.getElementById('staff_bundle_load');
+	  const genericBundleError = document.querySelector('.js-generic-bundle-error');
 	  const userId = <?= json_encode($user_id); ?>;
 	  const balanceAfter = document.getElementById('balance_after');
 	  const balanceAfterError = document.querySelector('.js-balance-after-error');
@@ -495,13 +645,21 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
 		const just4uFixedChargeHint = document.querySelector('.js-just4u-fixed-charge-hint');
 		const just4uPayableLabel = document.querySelector('.js-just4u-payable-label');
 		const just4uPayableField = document.querySelector('.js-just4u-payable-field');
+		const just4uChargePreviewInput = document.getElementById('just4u_charge');
+		const just4uPayablePreviewInput = document.getElementById('just4u_payable');
+		const bundleLoadPreview = document.getElementById('bundleLoadPreview');
+		const bundleChargePreview = document.getElementById('bundleChargePreview');
+		const bundlePaidTotalPreview = document.getElementById('bundlePaidTotalPreview');
+		const bundleNetPreview = document.getElementById('bundleNetPreview');
+		const bundleChargeNote = document.getElementById('bundleChargeNote');
+		const bundleChargeSummary = document.getElementById('bundleChargeSummary');
 
         function getSeedDenos(){
             const categoryValue = categorySelect ? categorySelect.value : '';
             let activeField = denosField;
             if (['MASHUP', 'MTN-DATA', 'AT-DATA', 'TELECEL-DATA'].includes(categoryValue)) {
                 activeField = mashupDenosField;
-            } else if (['5959', 'MTN UP2U', 'ISHARE', 'JUST4U'].includes(categoryValue)) {
+            } else if (['5959', 'MTN UP2U', 'ISHARE'].includes(categoryValue)) {
                 activeField = specialDenosField;
             }
 
@@ -522,16 +680,16 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
             }
         }
 
-        // Restore selects after validation reload
+        // Restore badge selections after validation reload
         const oldNetwork = document.getElementById('oldNetwork') ? document.getElementById('oldNetwork').value : '';
         const oldCategory = document.getElementById('oldCategory') ? document.getElementById('oldCategory').value : '';
         if (oldNetwork) {
             networkSelect.value = oldNetwork;
         }
-        updateCategoryOptions();
-        if (oldCategory) {
-            categorySelect.value = oldCategory;
-        }
+        renderNetworkBadges();
+        updateCategoryOptions(oldCategory || categorySelect.value);
+        renderSelectBadges(assignedSelect, assignedBadges);
+        renderSelectBadges(statusSelect, statusBadges);
         // Re-apply dependent field visibility + validation
         toggleFields();
         validateAmounts();
@@ -600,18 +758,54 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
         function syncJust4uPayableField() {
             const isJust4u = categorySelect && categorySelect.value === 'JUST4U';
             const loadAmount = parseFloat(specialAmountLoadInput?.value || '0') || 0;
-            const payableAmount = Math.max(0, loadAmount - mtnDataBundleCharge);
+            const chargeAmount = calculateBundleCharge(loadAmount, networkSelect.value, categorySelect.value);
+            const payableAmount = loadAmount;
 
             if (just4uPayableLabel) {
                 just4uPayableLabel.classList.toggle('d-none', !isJust4u);
             }
             if (just4uPayableField) {
                 just4uPayableField.classList.toggle('d-none', !isJust4u);
-                //just4uPayableField.value = isJust4u && loadAmount > 0 ? payableAmount.toFixed(2) : '';
+                just4uPayableField.value = isJust4u && loadAmount > 0 ? payableAmount.toFixed(2) : '';
             }
             if (just4uFixedChargeHint) {
                 just4uFixedChargeHint.classList.toggle('d-none', !isJust4u);
             }
+            if (just4uChargePreviewInput && isJust4u) {
+                just4uChargePreviewInput.value = chargeAmount.toFixed(2);
+            }
+            if (just4uPayablePreviewInput && isJust4u) {
+                just4uPayablePreviewInput.value = payableAmount.toFixed(2);
+            }
+        }
+
+        function updateChargeSummary() {
+            const categoryValue = categorySelect.value;
+            let loadAmount = 0;
+            if (['MASHUP', 'MTN-DATA', 'AT-DATA', 'TELECEL-DATA'].includes(categoryValue)) {
+                loadAmount = parseFloat(mashupAmountInput?.value || '0') || 0;
+            } else if (['5959', 'MTN UP2U', 'ISHARE', 'JUST4U'].includes(categoryValue)) {
+                loadAmount = parseFloat(specialAmountLoadInput?.value || '0') || 0;
+            } else if (categoryValue === 'STAFF BUNDLE') {
+                loadAmount = parseFloat(staffBundleLoadInput?.value || '0') || 0;
+            }
+
+            const chargeAmount = calculateBundleCharge(loadAmount, networkSelect.value, categoryValue);
+            if (bundleLoadPreview) bundleLoadPreview.textContent = `GHS ${loadAmount.toFixed(2)}`;
+            if (bundleChargePreview) bundleChargePreview.textContent = `GHS ${chargeAmount.toFixed(2)}`;
+            if (bundlePaidTotalPreview) bundlePaidTotalPreview.textContent = `GHS ${(loadAmount + chargeAmount).toFixed(2)}`;
+            if (bundleNetPreview) bundleNetPreview.textContent = `GHS ${loadAmount.toFixed(2)}`;
+            if (bundleChargeNote) {
+                if (!categoryValue) {
+                    bundleChargeNote.textContent = '';
+                } else if (chargeAmount > 0) {
+                    bundleChargeNote.textContent = 'The fee is added to the amount paid and recorded as commission; the full load amount is sent.';
+                } else {
+                    bundleChargeNote.textContent = 'No charge applies to this selection and amount.';
+                }
+            }
+            if (bundleChargeSummary) bundleChargeSummary.classList.toggle('d-none', !categoryValue || loadAmount <= 0);
+            syncJust4uPayableField();
         }
 
         function toggleFields() {
@@ -662,6 +856,7 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
             if (['MASHUP', 'MTN-DATA', 'AT-DATA', 'TELECEL-DATA'].includes(categoryValue)) {
                 const loadAmount = parseFloat(mashupAmountInput?.value || '0');
                 const paidAmount = parseFloat(mashupPaidInput?.value || '0');
+                const totalDue = loadAmount + calculateBundleCharge(loadAmount, networkSelect.value, categoryValue);
                 mashupError.textContent = '';
 
                 if (!loadAmount || loadAmount <= 0) {
@@ -674,15 +869,15 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
                     saveBtn.classList.add('disabled');
                     return;
                 }
-                if (Math.abs(paidAmount - loadAmount) > 0.01) {
-                    mashupError.textContent = `Amount paid must equal ${loadAmount.toFixed(2)}`;
+                if (paidAmount + 0.01 < totalDue) {
+                    mashupError.textContent = `Amount paid must be at least ${totalDue.toFixed(2)} (load plus charge)`;
                     saveBtn.classList.add('disabled');
                     return;
                 }
             } else if (['5959', 'MTN UP2U', 'ISHARE', 'JUST4U'].includes(categoryValue)) {
                 const loadAmount = parseFloat(specialAmountLoadInput?.value || '0');
                 const paidAmount = parseFloat(specialAmountPaidInput?.value || '0');
-                const ecashPayableAmount = Math.max(0, loadAmount - mtnDataBundleCharge);
+                const totalDue = loadAmount + calculateBundleCharge(loadAmount, networkSelect.value, categoryValue);
                 syncJust4uPayableField();
                 specialError.textContent = '';
 
@@ -696,13 +891,23 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
                     saveBtn.classList.add('disabled');
                     return;
                 }
-                if (categoryValue === 'JUST4U' && paidAmount + 0.01 < loadAmount) {
-                    specialError.textContent = `Amount paid must be at least ${loadAmount.toFixed(2)}. Amount Payable for e-cash is ${ecashPayableAmount.toFixed(2)}.`;
+                if (paidAmount + 0.01 < totalDue) {
+                    specialError.textContent = `Amount paid must be at least ${totalDue.toFixed(2)} (load plus charge)`;
                     saveBtn.classList.add('disabled');
                     return;
                 }
-                if (categoryValue !== 'JUST4U' && Math.abs(paidAmount - loadAmount) > 0.01) {
-                    specialError.textContent = `Amount paid must equal ${loadAmount.toFixed(2)}`;
+            } else if (categoryValue === 'STAFF BUNDLE') {
+                const loadAmount = parseFloat(staffBundleLoadInput?.value || '0');
+                const paidAmount = parseFloat(amountPaidInput?.value || '0');
+                const totalDue = loadAmount + calculateBundleCharge(loadAmount, networkSelect.value, categoryValue);
+                genericBundleError.textContent = '';
+                if (!loadAmount || loadAmount <= 0) {
+                    genericBundleError.textContent = 'Load amount is required';
+                    saveBtn.classList.add('disabled');
+                    return;
+                }
+                if (!paidAmount || paidAmount + 0.01 < totalDue) {
+                    genericBundleError.textContent = `Amount paid must be at least ${totalDue.toFixed(2)} (load plus charge)`;
                     saveBtn.classList.add('disabled');
                     return;
                 }
@@ -772,6 +977,9 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
                 mashupPaidInput.value = totalVolume.toFixed(2);
             } else if (['5959', 'MTN UP2U', 'ISHARE', 'JUST4U'].includes(categoryValue)) {
                 specialAmountPaidInput.value = totalVolume.toFixed(2);
+            } else if (categoryValue === 'STAFF BUNDLE') {
+                amountPaidInput.value = totalVolume.toFixed(2);
+                amountPaidInput.dispatchEvent(new Event('input', {bubbles: true}));
             } else {
                 amountInput.value = totalVolume.toFixed(2);
             }
@@ -800,13 +1008,28 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
         categorySelect.addEventListener('change', function() {
             toggleFields();
             validateAmounts();
+            updateChargeSummary();
         });
+        networkSelect.addEventListener('change', updateChargeSummary);
 
-        mashupAmountInput.addEventListener('input', validateAmounts);
-        specialAmountLoadInput.addEventListener('input', validateAmounts);
+        mashupAmountInput.addEventListener('input', function() {
+            validateAmounts();
+            updateChargeSummary();
+        });
+        specialAmountLoadInput.addEventListener('input', function() {
+            validateAmounts();
+            updateChargeSummary();
+        });
+        staffBundleLoadInput.addEventListener('input', function() {
+            amountInput.value = staffBundleLoadInput.value;
+            validateAmounts();
+            updateChargeSummary();
+        });
+        amountPaidInput.addEventListener('input', validateAmounts);
         mashupPaidInput.addEventListener('input', validateAmounts);
         specialAmountPaidInput.addEventListener('input', validateAmounts);
 
+        updateChargeSummary();
     });
 </script>
 
@@ -824,11 +1047,14 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
     const submitBtn = document.querySelector('.submit');
     const denosField = document.getElementById('denos');
     const amountInput = document.getElementById('amount');
+    const amountPaidInput = document.getElementById('amount_paid');
+    const staffBundleLoadInput = document.getElementById('staff_bundle_load');
     const mashupAmountInput = document.getElementById('mashup_amount');
     const mashupPaidInput = document.getElementById('mashup_paid');
     const mashupDenosField = document.getElementById('denos_mashup');
     const mashupError = document.querySelector('.js-mashup-error');
     const specialAmountLoadInput = document.getElementById('special_amount_load');
+    const just4uAmountInput = document.getElementById('just4u_amount');
     const specialAmountPaidInput = document.getElementById('special_amount_paid');
     const specialDenosField = document.getElementById('denos_special');
     const specialError = document.querySelector('.js-special-error');
@@ -873,7 +1099,8 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
     function syncJust4uPayableField() {
       const isJust4u = categorySelect && categorySelect.value === 'JUST4U';
       const loadAmount = roundMoney(specialAmountLoadInput && specialAmountLoadInput.value);
-      const payableAmount = Math.max(0, loadAmount - mtnDataBundleCharge);
+      const chargeAmount = calculateBundleCharge(loadAmount, networkSelect.value, categorySelect.value);
+      const payableAmount = loadAmount;
 
       if (just4uPayableLabel) {
         just4uPayableLabel.classList.toggle('d-none', !isJust4u);
@@ -881,6 +1108,10 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
       if (just4uPayableField) {
         just4uPayableField.classList.toggle('d-none', !isJust4u);
         just4uPayableField.value = isJust4u && loadAmount > 0 ? formatMoney(payableAmount) : '';
+      }
+      const just4uChargeField = document.getElementById('just4u_charge');
+      if (just4uChargeField && isJust4u) {
+        just4uChargeField.value = formatMoney(chargeAmount);
       }
       if (just4uFixedChargeHint) {
         just4uFixedChargeHint.classList.toggle('d-none', !isJust4u);
@@ -964,6 +1195,17 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
         };
       }
 
+      if (categoryValue === 'STAFF BUNDLE') {
+        return {
+          categoryValue,
+          eligible: true,
+          paidInput: amountPaidInput,
+          payableInput: staffBundleLoadInput,
+          denosInput: denosField,
+          errorEl: document.querySelector('.js-generic-bundle-error'),
+        };
+      }
+
       return {
         categoryValue,
         eligible: false,
@@ -1015,7 +1257,7 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
         return 0;
       }
       const loadAmount = roundMoney(context.payableInput && context.payableInput.value);
-      return loadAmount;
+      return roundMoney(loadAmount + calculateBundleCharge(loadAmount, networkSelect.value, context.categoryValue));
     }
 
     function getRequiredChangeAmount() {
@@ -1442,6 +1684,8 @@ $mtnDataBundleFlatCharge = (float)($mtnDataBundleCharge->commission_rate ?? 0.50
     specialAmountLoadInput.addEventListener('input', syncFromActivePaidField);
     mashupPaidInput.addEventListener('input', syncFromActivePaidField);
     specialAmountPaidInput.addEventListener('input', syncFromActivePaidField);
+    amountPaidInput.addEventListener('input', syncFromActivePaidField);
+    staffBundleLoadInput.addEventListener('input', syncFromActivePaidField);
 
     countInputs.forEach(input => {
       input.addEventListener('input', function () {

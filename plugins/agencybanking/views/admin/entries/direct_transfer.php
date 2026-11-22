@@ -1,4 +1,7 @@
 <?php if(user_can('add_agencybanking') || user_can('edit_momoremit')):?>
+	<link rel="stylesheet" href="<?=plugin_http_path('assets/css/agency-forms.css')?>?v=<?= (int)filemtime(__DIR__ . '/../../../assets/css/agency-forms.css') ?>">
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -110,7 +113,7 @@
 	 
 			<div class="mb-1">
 				<label for="transaction_type" class="form-label">Transaction type</label>
-				<select class="form-select transaction_type" id="transaction_type" name="transaction_type" onchange="updateSourceOptions();">
+				<select class="form-select transaction_type choice-badge-select" id="transaction_type" name="transaction_type" onchange="updateSourceOptions();">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_type','Direct transfer (CIT)')?> value="Direct transfer (CIT)" selected>Direct transfer (CIT)</option>
 				</select>
@@ -121,7 +124,7 @@
 	 
 			<div class="mb-1">
 				<label for="network" class="form-label">Source bank</label>
-				<select class="form-select" name="network" id="network">			  
+				<select class="form-select choice-badge-select" name="network" id="network">
 				  <!-- Options will be populated dynamically based on transaction type -->
 				</select>
 				<?php if(!empty($errors['network'])):?>
@@ -170,6 +173,11 @@
 			  <label for="amount_to_pay" class="form-label">Amount to Pay</label>
 			  <input name="amount_to_pay" value="<?=old_value('amount_to_pay')?>" type="text" class="form-control" id="amount_to_pay" placeholder="GH&cent;" readonly>
 				  <small class="text-danger" id="amount_to_pay-error"></small>
+				<div class="agency-amount-breakdown" id="directTransferBreakdown" aria-live="polite" aria-atomic="true" hidden>
+					<div class="agency-amount-breakdown__item"><span>Amount transferred</span><strong id="directTransferAmount">GHS 0.00</strong></div>
+					<div class="agency-amount-breakdown__item"><span>Charge deducted</span><strong id="directTransferCharge">GHS 0.00</strong></div>
+					<div class="agency-amount-breakdown__item"><span>Amount paid out</span><strong id="directTransferNet">GHS 0.00</strong></div>
+				</div>
 			</div>
 
 			<div class="col-md-12">
@@ -209,7 +217,7 @@
 
 			<div class="mb-1 transaction_status">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status">
+			  <select class="form-select transaction_status choice-badge-select" name="transaction_status">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 				  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>
@@ -387,6 +395,16 @@
 	const chargeInput = document.getElementById('charge');
 	const saveBtn = document.getElementById('save');
 	const amount_to_payError = document.querySelector('#amount_to_pay-error');
+	const directTransferBreakdown = document.getElementById('directTransferBreakdown');
+	const updateDirectTransferBreakdown = () => {
+		const amount = parseFloat(document.getElementById('balance_before').value) || 0;
+		const charge = parseFloat(chargeInput.value) || 0;
+		const net = parseFloat(amount_to_payInput.value) || 0;
+		directTransferBreakdown.hidden = amount <= 0;
+		document.getElementById('directTransferAmount').textContent = `GHS ${amount.toFixed(2)}`;
+		document.getElementById('directTransferCharge').textContent = `GHS ${charge.toFixed(2)}`;
+		document.getElementById('directTransferNet').textContent = `GHS ${net.toFixed(2)}`;
+	};
 	saveBtn.disabled= true;
 
 	function updateSourceOptions() {
@@ -429,6 +447,7 @@
 		}
 
 		amount_to_payField.value = newBalance.toFixed(2);
+		updateDirectTransferBreakdown();
 		const requiredLabel = document.getElementById('required-currency-total');
 		if (requiredLabel) requiredLabel.textContent = 'Required total: ' + newBalance.toFixed(2);
 		if (amount > newBalance || amount < newBalance) {
@@ -621,6 +640,9 @@
 	});
 	document.getElementById('balance_before').addEventListener('input', calculateAmountPayable);
 	document.getElementById('charge').addEventListener('input', calculateAmountPayable);
+	document.getElementById('amount').addEventListener('input', updateDirectTransferBreakdown);
+	document.getElementById('balance_before').addEventListener('input', updateDirectTransferBreakdown);
+	updateDirectTransferBreakdown();
 
 	(function(){
 		if(!window.AppImageCropper || typeof window.AppImageCropper.bindPreviewCard !== 'function') return;

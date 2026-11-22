@@ -1,4 +1,6 @@
 <?php if(user_can('add_agencybanking') || user_can('edit_momoremit')):?>
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -30,7 +32,7 @@
 	 
 			<div class="mb-2">
 				<label for="transaction_type" class="form-label">Transaction type</label>
-				<select class="form-select transaction_type" id="transaction_type" name="transaction_type" onchange="updateCategoryOptions()" onchange="updateSourceOptions()">
+				<select class="form-select transaction_type choice-badge-select" id="transaction_type" name="transaction_type" onchange="updateCategoryOptions()" onchange="updateSourceOptions()">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_type','Mini statement')?> value="Mini statement" selected>Mini statement</option>
 				</select>
@@ -42,7 +44,7 @@
 	 
 			<div class="mb-2">
 				<label for="network" class="form-label">Service provider</label>
-				<select class="form-select" name="network" id="network" onchange="showFields()">			  
+				<select class="form-select choice-badge-select" name="network" id="network" onchange="showFields()">
 				  <!-- Options will be populated dynamically based on transaction type -->
 				</select>
 
@@ -53,7 +55,7 @@
 	 
 			<div class="mb-2 category d-none">
 				<label for="category" class="form-label">Category</label>
-				<select class="form-select" name="category" id="category" onchange="showFields()">
+				<select class="form-select choice-badge-select" name="category" id="category" onchange="showFields()">
 				  <!-- Options will be populated dynamically based on transaction type -->
 				</select>
 
@@ -91,7 +93,7 @@
 
 			<div class="mb-2 id_type d-none">
 			  <label for="id_type" class="form-label">ID type</label>
-			  <select class="form-select id_type" name="id_type">
+			  <select class="form-select id_type choice-badge-select" name="id_type">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('id_type','Ghana card')?> value="Ghana card">Ghana card</option>
 				  <option <?=old_select('id_type','Voter ID')?> value="Voter ID">Voter ID</option>
@@ -114,7 +116,7 @@
 
 			<div class="mb-2 transaction_status d-none">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status">
+			  <select class="form-select transaction_status choice-badge-select" name="transaction_status">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 				  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>

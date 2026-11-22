@@ -235,6 +235,10 @@ if (!empty($row)) {
 				: $postdata['special_amount_load'];
 			$postdata['amount_paid'] = $postdata['special_amount_paid'];
 			$postdata['amount'] = $postdata['special_amount_load'];
+		} elseif ($categoryUpperIncoming === 'STAFF BUNDLE') {
+			$postdata['amount'] = $postdata['staff_bundle_load'] ?? ($row->amount ?? 0);
+			$postdata['amount_paid'] = $postdata['amount_paid'] ?? ($row->amount_paid ?? 0);
+			$postdata['amount_to_send'] = $postdata['amount'];
 		} else {
 			$postdata['amount'] = $postdata['amount'] ?? ($row->amount ?? 0);
 			$postdata['amount_paid'] = $postdata['amount_paid'] ?? ($row->amount_paid ?? $postdata['amount'] ?? 0);
@@ -263,15 +267,28 @@ if (!empty($row)) {
 
 	$isJust4uCategory = ($categoryUpperIncoming === 'JUST4U');
 	$isAirtimeEvdCategory = ($transactionTypeIncoming === 'Airtime' && $categoryUpperIncoming === 'EVD');
-	$just4uFixedCharge = 0.50;
+	$isMtnDataBundle = (
+		$transactionTypeIncoming !== 'Airtime'
+		&& strcasecmp(trim((string)($postdata['network'] ?? ($row->network ?? ''))), 'MTN') === 0
+		&& in_array($categoryUpperIncoming, ['MTN-DATA', 'MASHUP', 'JUST4U', 'MTN UP2U', '5959', 'ISHARE', 'STAFF BUNDLE'], true)
+	);
+	$bundleLoadAmount = (float)($postdata['special_amount_load'] ?? ($postdata['mashup_amount'] ?? ($postdata['amount'] ?? ($postdata['amount_to_send'] ?? 0))));
+	$bundleCharge = function_exists('dynamic_charge_calculate')
+		? dynamic_charge_calculate([
+			'commission_type' => 'MTN DATA BUNDLE',
+			'transaction_type' => $postdata['transaction_type'] ?? ($row->transaction_type ?? ''),
+			'network' => $postdata['network'] ?? ($row->network ?? ''),
+			'source_option' => 'Category',
+			'source_value' => $postdata['category'] ?? ($row->category ?? ''),
+		], $bundleLoadAmount)
+		: (float)($postdata['commission'] ?? ($row->commission ?? 0));
 	if (!$isSentLockedRecord && $isJust4uCategory) {
 		$just4uLoadAmount = (float)($postdata['special_amount_load'] ?? ($postdata['amount'] ?? ($postdata['amount_to_send'] ?? 0)));
-		$just4uEcashPayable = max(0, $just4uLoadAmount - $just4uFixedCharge);
-		$postdata['amount_to_send'] = number_format($just4uEcashPayable, 2, '.', '');
+		$postdata['amount_to_send'] = number_format($just4uLoadAmount, 2, '.', '');
 		$postdata['special_amount_load'] = number_format($just4uLoadAmount, 2, '.', '');
 		$postdata['amount'] = number_format($just4uLoadAmount, 2, '.', '');
 		if (empty($postdata['special_amount_paid'])) {
-			$postdata['special_amount_paid'] = number_format($just4uLoadAmount, 2, '.', '');
+			$postdata['special_amount_paid'] = number_format($just4uLoadAmount + $bundleCharge, 2, '.', '');
 		}
 		if (empty($postdata['amount_paid'])) {
 			$postdata['amount_paid'] = $postdata['special_amount_paid'];
@@ -279,7 +296,10 @@ if (!empty($row)) {
 		if (empty($postdata['cash_received_amount'])) {
 			$postdata['cash_received_amount'] = $postdata['special_amount_paid'];
 		}
-		$postdata['commission'] = number_format($just4uFixedCharge, 2, '.', '');
+		$postdata['commission'] = number_format($bundleCharge, 2, '.', '');
+	} elseif (!$isSentLockedRecord && $isMtnDataBundle) {
+		$postdata['amount_to_send'] = number_format($bundleLoadAmount, 2, '.', '');
+		$postdata['commission'] = number_format($bundleCharge, 2, '.', '');
 	} elseif ($isAirtimeEvdCategory) {
 		$evdLoadAmount = (float)($postdata['amount'] ?? ($postdata['amount_paid'] ?? ($row->amount ?? 0)));
 		$postdata['amount_to_send'] = number_format($evdLoadAmount, 2, '.', '');
@@ -290,7 +310,7 @@ if (!empty($row)) {
 	$mashupCategories = ['MASHUP', 'MTN-DATA', 'AT-DATA', 'TELECEL-DATA'];
 	$specialCategories = ['5959', 'MTN UP2U', 'ISHARE', 'JUST4U'];
 $isAirtimeChangeEligible = ($transactionTypeIncoming === 'Airtime' && in_array($categoryUpperIncoming, ['AIRTIME', 'CREDIT TRANSFER', 'EVD'], true));
-	$isBundleChangeEligible = ($transactionTypeIncoming !== 'Airtime' && (in_array($categoryUpperIncoming, $mashupCategories, true) || in_array($categoryUpperIncoming, $specialCategories, true)));
+	$isBundleChangeEligible = ($transactionTypeIncoming !== 'Airtime' && (in_array($categoryUpperIncoming, $mashupCategories, true) || in_array($categoryUpperIncoming, $specialCategories, true) || $categoryUpperIncoming === 'STAFF BUNDLE'));
 	$isChangeEligible = ($isAirtimeChangeEligible || $isBundleChangeEligible);
 	$paidFieldKey = 'amount_paid';
 	if (in_array($categoryUpperIncoming, $mashupCategories, true)) {
@@ -311,6 +331,14 @@ $isAirtimeChangeEligible = ($transactionTypeIncoming === 'Airtime' && in_array($
 	} else {
 		$payableAmount = (float)($postdata['amount'] ?? 0);
 	}
+	$bundleCustomerCharge = ($transactionTypeIncoming !== 'Airtime' && $isMtnDataBundle)
+		? (float)($postdata['commission'] ?? 0)
+		: 0.0;
+	if ($isSentLockedRecord) {
+		$bundleCustomerCharge = 0.0;
+	}
+	$basePayableAmount = $payableAmount;
+	$payableAmount += $bundleCustomerCharge;
 	$payableAmount = (float)number_format($payableAmount, 2, '.', '');
 
 	$cashReceivedAmount = (float)($postdata['cash_received_amount'] ?? ($postdata['amount_paid'] ?? ($row->amount_paid ?? $row->amount ?? 0)));
@@ -505,7 +533,7 @@ $isAirtimeChangeEligible = ($transactionTypeIncoming === 'Airtime' && in_array($
 
 			$postdata['cash_received_amount'] = number_format($cashReceivedAmount, 2, '.', '');
 			$postdata['amount_paid'] = number_format($cashReceivedAmount, 2, '.', '');
-			$postdata['amount'] = number_format($netTransactionAmount, 2, '.', '');
+			$postdata['amount'] = number_format(max(0, $netTransactionAmount - $bundleCustomerCharge), 2, '.', '');
 			if ($changeRequired > 0.01) {
 				$postdata['change_required'] = number_format($changeRequired, 2, '.', '');
 				$postdata['change_denominations'] = json_encode($changeDenominations, JSON_UNESCAPED_SLASHES);
@@ -518,7 +546,7 @@ $isAirtimeChangeEligible = ($transactionTypeIncoming === 'Airtime' && in_array($
 				goto end_edit;
 			}
 			$postdata['amount_paid'] = number_format($cashReceivedAmount, 2, '.', '');
-			$postdata['amount'] = number_format($payableAmount, 2, '.', '');
+			$postdata['amount'] = number_format($basePayableAmount, 2, '.', '');
 			$postdata['change_required'] = '';
 			$postdata['change_denominations'] = '[]';
 		}
@@ -804,15 +832,9 @@ $isAirtimeChangeEligible = ($transactionTypeIncoming === 'Airtime' && in_array($
 
 		$networkForCommission = strtoupper(trim((string)($postdata['network'] ?? ($row->network ?? ''))));
 
-		$commissionAmount = 0.0;
-
-
-
-		if ($categoryForCommission === 'JUST4U') {
-
-			$commissionAmount = 0.50;
-
-		}
+		$commissionAmount = ($categoryForCommission === 'JUST4U' || $isMtnDataBundle)
+			? (float)($postdata['commission'] ?? ($row->commission ?? 0))
+			: 0.0;
 
 
 

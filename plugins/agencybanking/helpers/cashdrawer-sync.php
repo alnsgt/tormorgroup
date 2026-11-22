@@ -796,6 +796,10 @@ if (!function_exists(__NAMESPACE__ . '\\agency_resolve_ecash_amount')) {
 		if (strpos($txType, 'WITHDRAWAL') !== false) {
 			$withdrawn = (float)($transaction['amount_withdrawn'] ?? 0);
 			if (is_finite($withdrawn) && $withdrawn > 0) {
+				if (strtolower(trim((string)($transaction['charging_type'] ?? ''))) === 'plus') {
+					$charge = max(0, (float)($transaction['charge'] ?? 0));
+					return $withdrawn + $charge;
+				}
 				return $withdrawn;
 			}
 
@@ -1718,12 +1722,7 @@ if (!function_exists(__NAMESPACE__ . '\\agency_reverse_approved_effects')) {
 			}
 		}
 
-		$txTypeForCommission = strtolower((string)($transaction->transaction_type ?? ''));
-		$isInterbankOrGipCharge = strpos($txTypeForCommission, 'interbank') !== false || strpos($txTypeForCommission, 'gip') !== false;
-		if ($isInterbankOrGipCharge) {
-			// Interbank/GIP charges are recorded on the transaction only; cleanup legacy commission rows if present.
-			agency_delete_instant_commission($transId);
-		} elseif (!agency_delete_instant_commission($transId)) {
+		if (!agency_delete_instant_commission($transId)) {
 			return ['ok' => false, 'cashdrawer_closing_balance' => $result['cashdrawer_closing_balance'], 'ecash_closing_balance' => $result['ecash_closing_balance'], 'message' => 'Commission reversal failed for this transaction.'];
 		}
 

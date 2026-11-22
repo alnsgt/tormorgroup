@@ -272,6 +272,7 @@ if(!function_exists('airtimebundle_fetch_dashboard_payload')){
 				'transaction_status' => $effectiveStatus,
 				'rejection_reason' => trim((string)($row->rejection_reason ?? '')),
 				'amount' => (float)($row->amount ?? 0),
+				'amount_to_send' => (float)($row->amount_to_send ?? 0),
 				'commission' => (float)($row->commission ?? 0),
 				'balance_after' => (float)($row->balance_after ?? 0),
 				'phone' => $row->phone,

@@ -1,10 +1,16 @@
 <?php
 $agencyInterbankRate = (new \Settings\CommissionRate)->first(['commission_type' => 'AGENCYBANKING INTERBANK']);
-$agencyInterbankPercent = (float)($agencyInterbankRate->commission_rate ?? 0.5) / 100;
+$agencyInterbankChargeRate = (float)($agencyInterbankRate->commission_rate ?? 0.5);
+$agencyInterbankChargeType = strtolower((string)($agencyInterbankRate->charge_type ?? 'percentage'));
+$agencyInterbankPercent = $agencyInterbankChargeRate / 100;
 $agencyInterbankStarting = (float)($agencyInterbankRate->starting_amount ?? 0);
 $agencyInterbankCap = (float)($agencyInterbankRate->cap_value ?? 0);
+$agencyInterbankIsCapped = !empty($agencyInterbankRate->is_capped);
 ?>
 <?php if(user_can('add_agencybanking') || user_can('edit_momoremit')):?>
+<link rel="stylesheet" href="<?=plugin_http_path('assets/css/agency-forms.css')?>?v=<?= (int)filemtime(__DIR__ . '/../../../assets/css/agency-forms.css') ?>">
+<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 <style>
  form {margin-top:40px!important;}
  .form-control,.form-select {
@@ -110,7 +116,7 @@ $agencyInterbankCap = (float)($agencyInterbankRate->cap_value ?? 0);
 
   <div class="mb-2">
   <label class="form-label">Transaction type</label>
-  <select id="transaction_type" name="transaction_type" class="form-select"
+  <select id="transaction_type" name="transaction_type" class="form-select choice-badge-select"
     onchange="if (typeof updateSourceOptions === 'function') { updateSourceOptions(); }">
   <option value="">---Select---</option>
   <option <?=old_select('transaction_type','Interbank (gip)')?> value="Interbank (gip)" selected>
@@ -122,13 +128,13 @@ $agencyInterbankCap = (float)($agencyInterbankRate->cap_value ?? 0);
 
   <div class="mb-2">
   <label class="form-label">Service provider</label>
-  <select id="network" name="network" class="form-select"></select>
+  <select id="network" name="network" class="form-select choice-badge-select"></select>
   <div id="networkError" class="text-error text-danger d-none">Service provider is required</div>
  </div>
 
   <div class="mb-2 category d-none">
   <label class="form-label">Category</label>
-  <select id="category" name="category" class="form-select"></select>
+  <select id="category" name="category" class="form-select choice-badge-select"></select>
  </div>
 
   <div class="mb-2">
@@ -145,7 +151,7 @@ $agencyInterbankCap = (float)($agencyInterbankRate->cap_value ?? 0);
 
   <div class="mb-2 destination_bank d-none">
   <label for="destination_bank" class="form-label">Destination bank</label>
-  <select class="form-select destination_bank" name="destination_bank">
+  <select class="form-select destination_bank choice-badge-select" name="destination_bank">
    <option value="">---Select---</option>
    <option <?=old_select('destination_bank','ABSA')?> value="ABSA">ABSA</option>
    <option <?=old_select('destination_bank','Access Bank')?> value="Access Bank">Access Bank</option>
@@ -204,14 +210,16 @@ $agencyInterbankCap = (float)($agencyInterbankRate->cap_value ?? 0);
   <div id="loadError" class="text-error text-danger d-none">Load amount is required &amp; must be ≤ 50,000</div>
  </div>
 
-  <div class="mb-2">
-  <label class="form-label">Interbank dynamic charge</label>
-  <input id="charge" name="charge" type="text" class="form-control" readonly>
- </div>
+  <input id="charge" name="charge" type="hidden" value="<?=htmlspecialchars((string)old_value('charge'), ENT_QUOTES, 'UTF-8')?>">
 
   <div class="mb-2">
-  <label class="form-label">Amount payable</label>
+  <label class="form-label">Total cash to pay</label>
   <input id="payable" name="payable" type="text" class="form-control" readonly>
+  <div class="agency-amount-breakdown" id="interbankChargeBreakdown" aria-live="polite" aria-atomic="true" hidden>
+   <div class="agency-amount-breakdown__item"><span>Amount sent</span><strong id="interbankLoadAmount">GHS 0.00</strong></div>
+   <div class="agency-amount-breakdown__item"><span>Interbank charge</span><strong id="interbankChargeAmount">GHS 0.00</strong></div>
+   <div class="agency-amount-breakdown__item agency-amount-breakdown__item--total"><span>Total cash to pay</span><strong id="interbankTotalPayable">GHS 0.00</strong></div>
+  </div>
  </div>
 
   <div class="col-md-12">
@@ -246,7 +254,7 @@ $agencyInterbankCap = (float)($agencyInterbankRate->cap_value ?? 0);
 
   <div class="mb-2 transaction_status">
   <label class="form-label">Status</label>
-  <select name="transaction_status" id="transaction_status" class="form-select">
+  <select name="transaction_status" id="transaction_status" class="form-select choice-badge-select">
   <option value="">---Select---</option>
   <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
   <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>
@@ -346,6 +354,7 @@ document.addEventListener("DOMContentLoaded", function() {
  const saveBtn = document.getElementById('save');
  const payableEl = document.getElementById('payable');
  const chargeEl = document.getElementById('charge');
+ const interbankBreakdown = document.getElementById('interbankChargeBreakdown');
  const requiredCurrencyTotalEl = document.getElementById('required-currency-total');
  const updateRequiredCurrencyTotal = () => {
   const payable = parseFloat(String(payableEl ? payableEl.value : '').replace(/,/g, '')) || 0;
@@ -401,25 +410,20 @@ document.addEventListener("DOMContentLoaded", function() {
    loadInput.value = 50000;
    load = 50000;
   }
-  let charge = load >= <?=json_encode($agencyInterbankStarting)?> ? load * <?=json_encode($agencyInterbankPercent)?> : 0;
-  <?php if ($agencyInterbankCap > 0): ?>
+  let charge = load >= <?=json_encode($agencyInterbankStarting)?>
+   ? (<?=json_encode($agencyInterbankChargeType)?> === 'flat' ? <?=json_encode($agencyInterbankChargeRate)?> : load * <?=json_encode($agencyInterbankPercent)?>)
+   : 0;
+  <?php if ($agencyInterbankIsCapped): ?>
   charge = Math.min(charge, <?=json_encode($agencyInterbankCap)?>);
   <?php endif; ?>
-  // Apply cents-based rounding rule:
-  // - 0.01..0.49 => .50
-  // - 0.51..0.99 => next 1.00
-  // - keep .00 and .50 as-is
-  let cents = Math.round(charge * 100);
-  let baseCents = Math.floor(cents / 100) * 100;
-  let fracCents = cents - baseCents;
-  if (fracCents > 0 && fracCents < 50) {
-   cents = baseCents + 50;
-  } else if (fracCents > 50 && fracCents < 100) {
-   cents = baseCents + 100;
-  }
-  charge = cents / 100;
+  charge = charge > 0 ? Math.ceil(charge * 10 - 1e-9) / 10 : 0;
+  const totalPayable = load + charge;
   chargeEl.value = charge.toFixed(2);
-  payableEl.value = (load + charge).toFixed(2);
+  payableEl.value = totalPayable.toFixed(2);
+  interbankBreakdown.hidden = load <= 0;
+  document.getElementById('interbankLoadAmount').textContent = `GHS ${load.toFixed(2)}`;
+  document.getElementById('interbankChargeAmount').textContent = `GHS ${charge.toFixed(2)}`;
+  document.getElementById('interbankTotalPayable').textContent = `GHS ${totalPayable.toFixed(2)}`;
   updateRequiredCurrencyTotal();
   checkFormValidity();
  }

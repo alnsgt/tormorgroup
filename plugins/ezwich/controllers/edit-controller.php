@@ -165,6 +165,25 @@ if (!empty($row)) {
 			}
 
 			$isApprovedToDeclined = ezwich_status_is_approved($existingStatus) && ezwich_status_is_declined($newStatus);
+			$transferType = trim((string)($postdata['transfer_type'] ?? ($row->transfer_type ?? '')));
+			$isNetPayoutFlow = in_array($transferType, ['All', 'Full', 'Part'], true);
+			if (!$isApprovedLockedRecord && $isNetPayoutFlow) {
+				$chargeBase = in_array($transferType, ['All', 'Full'], true)
+					? (float)($postdata['balance'] ?? $row->balance ?? 0)
+					: (float)($postdata['amount_requested'] ?? $postdata['amount'] ?? $row->amount ?? 0);
+				$postdata['charge'] = function_exists('dynamic_charge_calculate')
+					? dynamic_charge_calculate('EZWICH CHARGE', $chargeBase)
+					: (float)($postdata['charge'] ?? $row->charge ?? 0);
+				$postdata['charge'] = ceil(round(max(0, (float)$postdata['charge']), 6) * 10) / 10;
+				$chargeSettings = (new \Settings\CommissionRate)->first(['commission_type' => 'EZWICH CHARGE']);
+				if (!empty($chargeSettings->is_capped)) {
+					$postdata['charge'] = min($postdata['charge'], max(0, (float)($chargeSettings->cap_value ?? 0)));
+				}
+				$postdata['amount_payable'] = number_format($chargeBase, 2, '.', '');
+				if ((float)($postdata['amount'] ?? 0) <= 0) {
+					$postdata['amount'] = $chargeBase;
+				}
+			}
 			if ($isApprovedLockedRecord && !$isApprovedToDeclined) {
 				$ezwich->errors['transaction_status'] = 'Approved ezwich transactions can only be changed to Declined.';
 				set_value('errors', array_merge($ezwich->errors, $req->upload_errors));
@@ -223,17 +242,8 @@ if (!empty($row)) {
 				goto end_edit;
 			}
 
-			try {
-				$commissionDb = new \Core\Database;
-				$commissionDb->query(
-					"DELETE FROM commissions WHERE commission_type = :commission_type AND description LIKE :needle",
-					[
-						'commission_type' => 'EZWICH CHARGE',
-						'needle' => '%| ID ' . ($row->id ?? ''),
-					]
-				);
-			} catch (\Throwable $e) {
-				error_log('EZWICH CHARGE COMMISSION CLEANUP FAILED (EDIT): ' . $e->getMessage());
+			if (!ezwich_sync_charge_commission((object)array_merge((array)$row, $updateData), (int)$user_id)) {
+				error_log('EZWICH CHARGE COMMISSION SYNC FAILED (EDIT) for transaction ' . (int)$row->id);
 			}
 
 			$action = 'edited';

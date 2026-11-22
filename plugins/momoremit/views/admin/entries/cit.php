@@ -1,4 +1,6 @@
 <?php if(user_can('add_momoremit')):?>
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -138,7 +140,7 @@
     <!-- Transaction Type Selection -->
     <div class="col-md-12">
       <label for="transaction_type" class="form-label">Transaction type</label>
-      <select class="form-select" id="transaction_type" name="transaction_type">
+      <select class="form-select choice-badge-select" id="transaction_type" name="transaction_type">
         <option <?=old_select('transaction_type','CIT')?> value="CIT" selected>CIT</option>
       </select>
       <?php if(!empty($errors['transaction_type'])):?>
@@ -149,7 +151,7 @@
 		<!-- Network Selection -->
     <div class="col-md-12">
       <label for="network" class="form-label">Select Network</label>
-      <select class="form-select network" id="network" name="network" data-old="<?=esc(old_value('network'))?>">
+      <select class="form-select network choice-badge-select" id="network" name="network" data-old="<?=esc(old_value('network'))?>">
         <option value="">---Select---</option>
         <option  value="MOMOPAY">MTN MOMOPAY</option>
         <option  value="TELECEL">TELECEL</option>
@@ -164,7 +166,7 @@
     <!-- Category Selection, dynamic options populated by JavaScript -->
     <div class="mb-3 col-md-12 category d-none">
       <label for="category" class="form-label">Category</label>
-      <select class="form-select" name="category" id="category" data-old="<?=esc(old_value('category'))?>"></select>
+      <select class="form-select choice-badge-select" name="category" id="category" data-old="<?=esc(old_value('category'))?>"></select>
       <?php if(!empty($errors['category'])):?>
         <small class="text-danger"><?=$errors['category']?></small>
       <?php endif?>

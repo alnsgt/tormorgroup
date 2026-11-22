@@ -1,4 +1,6 @@
 <?php if(user_can('add_agencybanking')): ?>
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -16,6 +18,90 @@
 		.form-label {
 			color: gray;
 			font-size: 12px;
+		}
+		.ezwich-charge-summary {
+			box-sizing: border-box;
+			width: 100%;
+			margin-top: .75rem;
+			padding: 1rem;
+			border: 1px solid rgba(148, 163, 184, .28);
+			border-radius: 18px;
+			color: #f8fafc;
+			background: linear-gradient(135deg, #0f172a 0%, #172554 58%, #1e3a5f 100%);
+			box-shadow: 0 14px 30px rgba(15, 23, 42, .18);
+		}
+		.ezwich-charge-summary[hidden] {
+			display: none !important;
+		}
+		.ezwich-charge-summary__heading {
+			display: flex;
+			align-items: center;
+			gap: .7rem;
+			margin-bottom: .85rem;
+		}
+		.ezwich-charge-summary__icon {
+			display: grid;
+			width: 2.4rem;
+			height: 2.4rem;
+			place-items: center;
+			border-radius: 12px;
+			color: #fde68a;
+			background: rgba(250, 204, 21, .14);
+		}
+		.ezwich-charge-summary__heading strong,
+		.ezwich-charge-summary__heading small {
+			display: block;
+		}
+		.ezwich-charge-summary__heading small {
+			margin-top: .1rem;
+			color: #cbd5e1;
+		}
+		.ezwich-charge-summary__grid {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: .6rem;
+		}
+		.ezwich-charge-summary__item {
+			display: flex;
+			min-width: 0;
+			box-sizing: border-box;
+			flex-direction: column;
+			gap: .35rem;
+			padding: .75rem;
+			border: 1px solid rgba(203, 213, 225, .16);
+			border-radius: 13px;
+			background: rgba(255, 255, 255, .06);
+		}
+		.ezwich-charge-summary__item span {
+			min-width: 0;
+			color: #cbd5e1;
+			font-size: .75rem;
+			overflow-wrap: anywhere;
+		}
+		.ezwich-charge-summary__item strong {
+			max-width: 100%;
+			font-size: clamp(.78rem, 3.2vw, 1.05rem);
+			font-variant-numeric: tabular-nums;
+			overflow-wrap: anywhere;
+		}
+		.ezwich-charge-summary__item--sent {
+			border-color: rgba(110, 231, 183, .38);
+			background: linear-gradient(135deg, rgba(16, 185, 129, .2), rgba(16, 185, 129, .08));
+		}
+		.ezwich-charge-summary__item--sent strong {
+			color: #a7f3d0;
+		}
+		@media (max-width: 520px) {
+			.ezwich-charge-summary {
+				padding: .85rem;
+			}
+			.ezwich-charge-summary__grid {
+				grid-template-columns: 1fr;
+				gap: .45rem;
+			}
+			.ezwich-charge-summary__item {
+				align-items: flex-start;
+			}
 		}
 
 		.transaction-preview-card{
@@ -112,7 +198,7 @@
 	 
 			<div class="col-mb-12 ">
 				<label for="transaction_type" class="form-label">Transaction type</label>
-				<select class="form-select transaction_type" id="transaction_type" name="transaction_type" >
+				<select class="form-select transaction_type choice-badge-select" id="transaction_type" name="transaction_type" >
 				  <option <?=old_select('transaction_type','Transfer')?> value="Transfer" selected>Transfer</option>
 				</select>
 				<?php if(!empty($errors['transaction_type'])): ?>
@@ -122,7 +208,7 @@
 
 			<div class="col-mb-12 ">
 			  <label for="transfer_type" class="form-label">Transfer type</label>
-			  <select class="form-select" name="transfer_type" id="transfer_type">	
+			  <select class="form-select choice-badge-select" name="transfer_type" id="transfer_type">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transfer_type','All')?> value="All">All</option>
 				  <option <?=old_select('transfer_type','Part')?> value="Part">Part</option>
@@ -150,7 +236,7 @@
 
 			<div class="col-mb-12  receiving d-none">
 			  <label for="receiving" class="form-label">Receiving sim</label>
-			  <select class="form-select" name="receiving" id="receiving">	
+			  <select class="form-select choice-badge-select" name="receiving" id="receiving">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transfer_to','Company sim')?> value="Company sim" selected>Company sim</option>
 				  <option <?=old_select('transfer_to','Client sim')?> value="Client sim">Client sim</option>
@@ -177,9 +263,10 @@
 			</div>
 
 		    <div class="col-mb-12">
-		      <label for="amount_payable" class="form-label">Amount Transferrable</label>
+		      <label for="amount_payableRounded" class="form-label">Amount requested (before charge)</label>
 		          <input name="amount_payable" value="<?=old_value('amount_payable')?>" type="hidden" step="0.01" class="form-control" id="amount_payable" placeholder="Enter amount payable">
 		          <input name="amount_payableRounded" value="<?=old_value('amount_payableRounded')?>" type="number" step="0.01" class="form-control" id="amount_payableRounded" placeholder="system generated" readonly>
+		          <input name="amount_requested" value="<?=old_value('amount_requested')?>" type="hidden" id="amount_requested">
 		      <?php if(!empty($errors['amount_payable'])):?>
 		        <small class="text-danger"><?=$errors['amount_payable']?></small>
 		      <?php endif?>
@@ -188,6 +275,17 @@
 		    <div class="col-mb-12">
 		      <label for="charge" class="form-label">Charge</label>
 		          <input name="charge" value="<?=old_value('charge')?>" type="number" step="0.01" class="form-control" id="charge" readonly>
+		      <div class="ezwich-charge-summary" id="netAmountPreview" aria-live="polite" aria-atomic="true" hidden>
+		        <div class="ezwich-charge-summary__heading">
+		          <span class="ezwich-charge-summary__icon"><i class="fa-solid fa-receipt" aria-hidden="true"></i></span>
+		          <div><strong>Transfer breakdown</strong><small>The charge is deducted before payout.</small></div>
+		        </div>
+		        <div class="ezwich-charge-summary__grid">
+		          <div class="ezwich-charge-summary__item"><span>Amount requested</span><strong id="requestedAmountPreview">GHS 0.00</strong></div>
+		          <div class="ezwich-charge-summary__item"><span>Charge deducted</span><strong id="chargeAmountPreview">GHS 0.00</strong></div>
+		          <div class="ezwich-charge-summary__item ezwich-charge-summary__item--sent"><span>Amount sent</span><strong id="sentAmountPreview">GHS 0.00</strong></div>
+		        </div>
+		      </div>
 		    </div>
 
 			<div class="col-md-12">
@@ -255,7 +353,7 @@
 
 			<div class="col-mb-12 transaction_status d-none">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status">
+			  <select class="form-select transaction_status choice-badge-select" name="transaction_status">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 				  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>
@@ -598,6 +696,11 @@
 		const balanceInput = document.getElementById("balance");
 		const amountPayableInput = document.getElementById("amount_payable");
 		const amountPayableRoundedInput = document.getElementById("amount_payableRounded");
+		const amountRequestedInput = document.getElementById("amount_requested");
+		const netAmountPreview = document.getElementById("netAmountPreview");
+		const requestedAmountPreview = document.getElementById("requestedAmountPreview");
+		const chargeAmountPreview = document.getElementById("chargeAmountPreview");
+		const sentAmountPreview = document.getElementById("sentAmountPreview");
 		const transactionType = document.getElementById('transaction_type');
 		const transferType = document.getElementById('transfer_type');
 		const receivingSelect = document.getElementById('receiving');
@@ -665,6 +768,7 @@
 		transferType.addEventListener("change", function() {
 			amountPayableInput.value = "";
 			amountPayableRoundedInput.value = "";
+			amountRequestedInput.value = "";
 			balanceInput.value = "";
 			chargeInput.value = "";
 			amountError.textContent = "";
@@ -676,20 +780,37 @@
 
 	  function calculateCharge() {
 		  <?php $ezwichDynamicCharge = (new \Settings\CommissionRate)->first(['commission_type' => 'EZWICH CHARGE']); ?>
-		  const charge = <?= (float)($ezwichDynamicCharge->commission_rate ?? $settings->ezwich_charges ?? 0) / 100 ?>;
+		  const chargeRate = <?= (float)($ezwichDynamicCharge->commission_rate ?? $settings->ezwich_charges ?? 0) ?>;
+		  const chargeType = <?= json_encode(strtolower((string)($ezwichDynamicCharge->charge_type ?? 'percentage'))) ?>;
 		  const startingAmount = <?= (float)($ezwichDynamicCharge->starting_amount ?? 1430) ?>;
 		  const capValue = <?= (float)($ezwichDynamicCharge->cap_value ?? 50) ?>;
+		  const isCapped = <?= !empty($ezwichDynamicCharge->is_capped) ? 'true' : 'false' ?>;
 		  const type = (transferType.value || "").trim();
 
 		  const toNum = (val) => {
 			  const n = parseFloat(val);
 			  return Number.isFinite(n) ? n : 0;
 		  };
+		  const calculateConfiguredCharge = (amount) => {
+			  if (amount < startingAmount) return 0;
+			  let result = chargeType === "flat" ? chargeRate : amount * chargeRate / 100;
+			  if (isCapped) result = Math.min(result, capValue);
+			  const roundedResult = Math.ceil((Math.round(result * 1000000) / 1000000) * 10) / 10;
+			  return Math.max(0, isCapped ? Math.min(roundedResult, capValue) : roundedResult);
+		  };
+		  const renderChargePreview = (requested, charge, sent) => {
+			  requestedAmountPreview.textContent = `GHS ${requested.toFixed(2)}`;
+			  chargeAmountPreview.textContent = `GHS ${charge.toFixed(2)}`;
+			  sentAmountPreview.textContent = `GHS ${sent.toFixed(2)}`;
+			  netAmountPreview.hidden = false;
+		  };
 
 		  if (type === "") {
 			  chargeInput.value = "";
 			  amountPayableInput.value = "";
 			  amountPayableRoundedInput.value = "";
+			  amountRequestedInput.value = "";
+			  netAmountPreview.hidden = true;
 			  return;
 		  }
 
@@ -699,13 +820,17 @@
 				  chargeInput.value = "";
 				  amountPayableInput.value = "";
 				  amountPayableRoundedInput.value = "";
+				  amountRequestedInput.value = "";
+				  netAmountPreview.hidden = true;
 				  return;
 			  }
-			  const computedCharge = (balance < startingAmount) ? 0 : Math.min(balance * charge, capValue);
+			  amountRequestedInput.value = balance.toFixed(2);
+			  const computedCharge = calculateConfiguredCharge(balance);
 			  chargeInput.value = computedCharge.toFixed(2);
-			  const amountPayable = balance - computedCharge;
+			  const amountPayable = Math.max(0, balance - computedCharge);
 			  amountPayableInput.value = amountPayable.toFixed(2);
-			  amountPayableRoundedInput.value = amountPayable.toFixed(0);
+			  amountPayableRoundedInput.value = balance.toFixed(0);
+			  renderChargePreview(balance, computedCharge, amountPayable);
 			  return;
 		  }
 
@@ -715,12 +840,17 @@
 			  if (!requested) {
 				  chargeInput.value = "";
 				  amountPayableInput.value = "";
+				  amountRequestedInput.value = "";
+				  netAmountPreview.hidden = true;
 				  return;
 			  }
 			  amountPayableRoundedInput.value = requested.toString();
-			  amountPayableInput.value = requested.toFixed(2);
-			  const computedCharge = (requested < startingAmount) ? 0 : Math.min(requested * charge, capValue);
+			  amountRequestedInput.value = requested.toFixed(2);
+			  const computedCharge = calculateConfiguredCharge(requested);
+			  const amountPayable = Math.max(0, requested - computedCharge);
+			  amountPayableInput.value = amountPayable.toFixed(2);
 			  chargeInput.value = computedCharge.toFixed(2);
+			  renderChargePreview(requested, computedCharge, amountPayable);
 		  }
 	    }
 
@@ -728,6 +858,11 @@
 	    	const amountPayable = parseFloat(amountPayableInput.value) || 0;
 	    	const amountPayableRounded = (amountPayable).toFixed(0) || 0;
 	    	const amountPaid = parseFloat(amountInput.value).toFixed(0) || 0;
+            if ((transferType.value === "Part" || transferType.value === "All") && (parseFloat(amountRequestedInput.value) || 0) > 0 && amountPayable <= 0) {
+                amountError.textContent = "The charge must be less than the requested amount";
+                saveBtn.classList.add("disabled");
+                return;
+            }
 	    	
 	    	// If no amount has been entered yet, don't disable - let validateForm handle it
 	    	if (amountPaid === 0) {

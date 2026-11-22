@@ -199,6 +199,7 @@ function backoffice_run_charges_backfill(Database $db, bool $force = false): arr
 		'inserted' => 0,
 		'skipped_existing' => 0,
 		'skipped_zero' => 0,
+		'skipped_rejected' => 0,
 		'skipped_record_only' => 0,
 		'errors' => 0,
 	];
@@ -208,7 +209,7 @@ function backoffice_run_charges_backfill(Database $db, bool $force = false): arr
 	}
 
 	backoffice_ensure_backfill_log($db);
-	$slug = 'charges_backfill_v1';
+	$slug = 'charges_backfill_v2';
 	if (!backoffice_should_run_backfill($db, $slug, $force)) {
 		return $stats;
 	}
@@ -279,19 +280,11 @@ function backoffice_run_charges_backfill(Database $db, bool $force = false): arr
 					$stats['skipped_zero']++;
 					continue;
 				}
-				$transactionType = strtolower(trim((string)($row->transaction_type ?? '')));
-				$needle = '%| ID ' . ($row->id ?? '');
-				if (strpos($transactionType, 'interbank') !== false || strpos($transactionType, 'gip') !== false) {
-					$db->query(
-						"DELETE FROM commissions WHERE commission_type = :commission_type AND description LIKE :needle",
-						[
-							'commission_type' => 'AGENCYBANKING CHARGE',
-							'needle' => $needle,
-						]
-					);
-					$stats['skipped_record_only']++;
+				if (in_array(strtolower((string)($row->transaction_status ?? '')), ['rejected', 'declined'], true)) {
+					$stats['skipped_rejected']++;
 					continue;
 				}
+				$needle = '%| ID ' . ($row->id ?? '');
 				$commissionDescription = 'AGENCYBANKING CHARGE | ' . ($row->network ?? '') . ' | ' . ($row->transaction_type ?? '') . ' | ID ' . ($row->id ?? '');
 				if (backoffice_commission_exists($db, 'AGENCYBANKING CHARGE', $needle)) {
 					$stats['skipped_existing']++;
@@ -370,15 +363,103 @@ function backoffice_run_charges_backfill(Database $db, bool $force = false): arr
 		}
 	}
 
-	// Ezwich charges are record-only, not commissions. Remove legacy rows and do not backfill them.
+	// Ezwich charges
 	if ($db->table_exists(['ezwichs'])) {
-		try {
-			$db->query(
-				"DELETE FROM commissions WHERE commission_type = :commission_type",
-				['commission_type' => 'EZWICH CHARGE']
-			);
-		} catch (\Throwable $e) {
-			$stats['errors']++;
+		$rows = $db->query("SELECT id, charge, network, transaction_type, transaction_status, created_by, date_created FROM ezwichs WHERE (deleted IS NULL OR deleted = 0) AND COALESCE(charge,0) > 0") ?: [];
+		foreach ($rows as $row) {
+			try {
+				$chargeValue = (float)($row->charge ?? 0);
+				if ($chargeValue <= 0) {
+					$stats['skipped_zero']++;
+					continue;
+				}
+				if (in_array(strtolower((string)($row->transaction_status ?? '')), ['rejected', 'declined'], true)) {
+					$stats['skipped_rejected']++;
+					continue;
+				}
+				$needle = '%| ID ' . ($row->id ?? '');
+				if (backoffice_commission_exists($db, 'EZWICH CHARGE', $needle)) {
+					$stats['skipped_existing']++;
+					continue;
+				}
+				$commissionInsert = [
+					'date_received' => $row->date_created ?? $now,
+					'colletion_period' => 'INSTANT',
+					'network' => $row->network ?? null,
+					'commission_type' => 'EZWICH CHARGE',
+					'description' => 'EZWICH CHARGE | ' . ($row->transaction_type ?? '') . ' | ID ' . ($row->id ?? ''),
+					'pay_to' => (int)($row->created_by ?? 0),
+					'receiving_wallet' => null,
+					'amount' => $chargeValue,
+					'transaction_status' => $row->transaction_status ?? 'Approved',
+					'created_by' => (int)($row->created_by ?? 0),
+					'updated_by' => null,
+					'disabled' => 0,
+					'deleted' => 0,
+					'date_created' => $row->date_created ?? $now,
+					'date_updated' => null,
+					'date_deleted' => null,
+				];
+				$commissionSql = "INSERT INTO commissions (" . implode(',', array_keys($commissionInsert)) . ") VALUES (:" . implode(',:', array_keys($commissionInsert)) . ")";
+				$db->query($commissionSql, $commissionInsert);
+				$stats['inserted']++;
+			} catch (\Throwable $e) {
+				$stats['errors']++;
+			}
+		}
+	}
+
+	// MTN data-bundle charges
+	if ($db->table_exists(['airtimebundles'])) {
+		$rows = $db->query(
+			"SELECT id, commission, network, transaction_type, category, transaction_status, created_by, date_created
+			 FROM airtimebundles
+			 WHERE (deleted IS NULL OR deleted = 0)
+			   AND UPPER(COALESCE(network,'')) = 'MTN'
+			   AND UPPER(COALESCE(transaction_type,'')) <> 'AIRTIME'
+			   AND UPPER(COALESCE(category,'')) IN ('MTN-DATA','MASHUP','JUST4U','MTN UP2U','5959','ISHARE','STAFF BUNDLE')
+			   AND COALESCE(commission,0) > 0"
+		) ?: [];
+		foreach ($rows as $row) {
+			try {
+				$chargeValue = (float)($row->commission ?? 0);
+				if ($chargeValue <= 0) {
+					$stats['skipped_zero']++;
+					continue;
+				}
+				if (in_array(strtolower((string)($row->transaction_status ?? '')), ['rejected', 'declined'], true)) {
+					$stats['skipped_rejected']++;
+					continue;
+				}
+				$needle = '%| ID ' . ($row->id ?? '');
+				if (backoffice_commission_exists($db, 'AIRTIMEBUNDLE INSTANT', $needle)) {
+					$stats['skipped_existing']++;
+					continue;
+				}
+				$commissionInsert = [
+					'date_received' => $row->date_created ?? $now,
+					'colletion_period' => 'INSTANT',
+					'network' => $row->network ?? null,
+					'commission_type' => 'AIRTIMEBUNDLE INSTANT',
+					'description' => 'AIRTIMEBUNDLE INSTANT | ' . strtoupper((string)($row->transaction_type ?? '')) . ' | ' . strtoupper((string)($row->category ?? '')) . ' | ' . strtoupper((string)($row->network ?? '')) . ' | ID ' . ($row->id ?? ''),
+					'pay_to' => (int)($row->created_by ?? 0),
+					'receiving_wallet' => null,
+					'amount' => $chargeValue,
+					'transaction_status' => $row->transaction_status ?? 'Approved',
+					'created_by' => (int)($row->created_by ?? 0),
+					'updated_by' => null,
+					'disabled' => 0,
+					'deleted' => 0,
+					'date_created' => $row->date_created ?? $now,
+					'date_updated' => null,
+					'date_deleted' => null,
+				];
+				$commissionSql = "INSERT INTO commissions (" . implode(',', array_keys($commissionInsert)) . ") VALUES (:" . implode(',:', array_keys($commissionInsert)) . ")";
+				$db->query($commissionSql, $commissionInsert);
+				$stats['inserted']++;
+			} catch (\Throwable $e) {
+				$stats['errors']++;
+			}
 		}
 	}
 

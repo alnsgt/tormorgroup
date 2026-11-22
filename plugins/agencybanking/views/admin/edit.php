@@ -1069,7 +1069,7 @@
 	        { value: "GhQR", text: "GhQR" },
 	        { value: "Cal bank", text: "Cal bank" },
 	        { value: "Ecobank", text: "Ecobank" },
-	        { value: "Fidelity Bank", text: "Fidelity Bank [Account to Account" }
+	        { value: "Fidelity Bank", text: "Fidelity Bank [Account to Account]" }
 	    ],
 		"Account opening": [
 			{ value: "", text: "---Select---" },

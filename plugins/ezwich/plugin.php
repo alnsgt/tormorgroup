@@ -86,31 +86,6 @@ if(!$db->table_exists($tables)){
 	die;
 }
 
-if(!function_exists('ezwich_cleanup_charge_commissions')){
-	function ezwich_cleanup_charge_commissions(): void
-	{
-		static $cleaned = false;
-		if ($cleaned) {
-			return;
-		}
-		$cleaned = true;
-		try {
-			$db = new \Core\Database;
-			if (!$db->table_exists(['commissions'])) {
-				return;
-			}
-			$db->query(
-				"DELETE FROM commissions WHERE commission_type = :commission_type",
-				['commission_type' => 'EZWICH CHARGE']
-			);
-		} catch (\Throwable $e) {
-			error_log('EZWICH CHARGE COMMISSION CLEANUP FAILED: ' . $e->getMessage());
-		}
-	}
-}
-
-ezwich_cleanup_charge_commissions();
-
 require_once plugin_path('helpers/transactions-helper.php');
 
 if(!function_exists('ezwich_build_filters')){

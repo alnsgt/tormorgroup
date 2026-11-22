@@ -1,4 +1,7 @@
 <?php if(user_can('add_agencybanking') || user_can('edit_momoremit')):?>
+	<link rel="stylesheet" href="<?=plugin_http_path('assets/css/agency-forms.css')?>?v=<?= (int)filemtime(__DIR__ . '/../../../assets/css/agency-forms.css') ?>">
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -30,7 +33,7 @@
 	 
 			<div class="mb-2">
 				<label for="transaction_type" class="form-label">Transaction type</label>
-				<select class="form-select transaction_type" id="transaction_type" name="transaction_type" onchange="updateCategoryOptions()" onchange="updateSourceOptions()">
+				<select class="form-select transaction_type choice-badge-select" id="transaction_type" name="transaction_type" onchange="updateCategoryOptions()" onchange="updateSourceOptions()">
 				  <option value="">---Select---</option>
 				  <option selected <?=old_select('transaction_type','International transfer')?> value="International transfer">International transfer</option>
 				</select>
@@ -42,7 +45,7 @@
 	 
 			<div class="mb-2">
 				<label for="network" class="form-label">Service provider</label>
-				<select class="form-select" name="network" id="network" onchange="showFields()">			  
+				<select class="form-select choice-badge-select" name="network" id="network" onchange="showFields()">
 				  <!-- Options will be populated dynamically based on transaction type -->
 				</select>
 
@@ -53,7 +56,7 @@
 	 
 			<div class="mb-2 category d-none">
 				<label for="category" class="form-label">Category</label>
-				<select class="form-select" name="category" id="category" onchange="showFields()">
+				<select class="form-select choice-badge-select" name="category" id="category" onchange="showFields()">
 				  <!-- Options will be populated dynamically based on transaction type -->
 				</select>
 
@@ -82,7 +85,7 @@
 
 			<div class="mb-2 destination_bank d-none">
 			  <label for="destination_bank" class="form-label">Destination bank</label>
-			  <select class="form-select destination_bank" name="destination_bank">
+			  <select class="form-select destination_bank choice-badge-select" name="destination_bank">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('destination_bank','Access Bank')?> value="Access Bank">Access Bank</option>
 				  <option <?=old_select('destination_bank','ADB')?> value="ADB">ADB</option>
@@ -148,6 +151,11 @@
 			<div class="mb-2 amount d-none">
 			  <label for="amount" class="form-label">Amount</label>
 			  <input name="amount" value="<?=old_value('amount')?>" type="number" step="0.01" class="form-control" id="amount" placeholder="Enter amount">
+				<div class="agency-amount-breakdown" id="internationalTransferBreakdown" aria-live="polite" aria-atomic="true" hidden>
+					<div class="agency-amount-breakdown__item"><span>Amount sent</span><strong id="internationalTransferAmount">GHS 0.00</strong></div>
+					<div class="agency-amount-breakdown__item"><span>Charge applied</span><strong id="internationalTransferCharge">GHS 0.00</strong></div>
+					<div class="agency-amount-breakdown__item"><span>Total deducted</span><strong id="internationalTransferTotal">GHS 0.00</strong></div>
+				</div>
 				
 				<?php if(!empty($errors['amount'])):?>
 				  <small class="text-danger"><?=$errors['amount']?></small>
@@ -188,7 +196,7 @@
 
 			<div class="mb-2 id_type d-none">
 			  <label for="id_type" class="form-label">ID type</label>
-			  <select class="form-select id_type" name="id_type">
+			  <select class="form-select id_type choice-badge-select" name="id_type">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('id_type','Ghana card')?> value="Ghana card">Ghana card</option>
 				  <option <?=old_select('id_type','Voter ID')?> value="Voter ID">Voter ID</option>
@@ -270,7 +278,7 @@
 
 			<div class="mb-2 transaction_status d-none">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status">
+			  <select class="form-select transaction_status choice-badge-select" name="transaction_status">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 				  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>
@@ -546,6 +554,16 @@
 			chargeInput.value = (0 * 0.01).toFixed(2); // Clear charge if amount is not a valid number
 				chargeInput.innerText += chargeInput.value;
 		}
+		updateInternationalTransferBreakdown();
+	}
+
+	function updateInternationalTransferBreakdown() {
+		const amount = parseFloat(document.getElementById('amount').value) || 0;
+		const charge = parseFloat(document.getElementById('charge').value) || 0;
+		document.getElementById('internationalTransferBreakdown').hidden = amount <= 0;
+		document.getElementById('internationalTransferAmount').textContent = `GHS ${amount.toFixed(2)}`;
+		document.getElementById('internationalTransferCharge').textContent = `GHS ${charge.toFixed(2)}`;
+		document.getElementById('internationalTransferTotal').textContent = `GHS ${(amount + charge).toFixed(2)}`;
 	}
 
 	function calculateBalance() {
@@ -595,5 +613,7 @@
 	document.getElementById('amount').addEventListener('input', calculateBalance);
 	document.getElementById('balance_before').addEventListener('input', calculateBalance);
 	document.getElementById('charge').addEventListener('input', calculateBalance);
+	document.getElementById('amount').addEventListener('input', updateInternationalTransferBreakdown);
+	updateInternationalTransferBreakdown();
 </script>
 

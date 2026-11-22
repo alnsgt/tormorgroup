@@ -385,6 +385,8 @@ if ($csrf && $momoremit->validate_insert($postdata)) {
         }
 
         $cashinEcashChannelKey = null;
+        $cashinSharedBankAccountKey = null;
+        $cashinEcashOpeningBalance = 0.0;
         if ($trans_status === 'Approved' && $txType === 'Cash in' && $transactionAmount > 0 && $network !== '') {
             if ($drawer_id <= 0) {
                 $momoremit->errors['network'] = 'Cashdrawer not found for this user, so e-cash balance cannot be validated.';
@@ -427,16 +429,50 @@ if ($csrf && $momoremit->validate_insert($postdata)) {
                     $resolvedKey = null;
                     $currentBalance = 0.0;
                     $foundChannelRow = false;
-                    foreach ($keysToTry as $k) {
-                        $rows = $dbBalGuard->query(
-                            "SELECT channel_key, closing_balance FROM drawer_balances WHERE drawer_id = :drawer_id AND user_id = :user_id AND channel_type = 'ecash' AND channel_key = :channel_key ORDER BY id DESC LIMIT 1",
-                            ['drawer_id' => $ecashTargetDrawerId, 'user_id' => $ecashTargetUserId, 'channel_key' => $k]
+
+                    if (strcasecmp($network, 'GHANAPAY') === 0
+                        && strcasecmp(trim((string)($postdata['sim_type'] ?? '')), 'Bank') === 0
+                        && function_exists('momoremits_shared_bank_balance')) {
+                        $sharedBankBalance = momoremits_shared_bank_balance((string)($postdata['bank_name'] ?? ''));
+                        if (!empty($sharedBankBalance)) {
+                            $cashinSharedBankAccountKey = (string)($sharedBankBalance['account_key'] ?? '');
+                            $resolvedKey = $keysToTry[0] ?? ('ECASH_' . $cashinSharedBankAccountKey);
+                            $currentBalance = (float)($sharedBankBalance['closing_balance'] ?? 0);
+                            $cashinEcashOpeningBalance = $currentBalance;
+                            $foundChannelRow = $cashinSharedBankAccountKey !== '';
+                        }
+                    }
+
+                    if (!$foundChannelRow) {
+                        foreach ($keysToTry as $k) {
+                            $rows = $dbBalGuard->query(
+                                "SELECT channel_key, closing_balance FROM drawer_balances WHERE drawer_id = :drawer_id AND user_id = :user_id AND channel_type = 'ecash' AND channel_key = :channel_key ORDER BY id DESC LIMIT 1",
+                                ['drawer_id' => $ecashTargetDrawerId, 'user_id' => $ecashTargetUserId, 'channel_key' => $k]
+                            );
+                            if (!empty($rows)) {
+                                $resolvedKey = (string)($rows[0]->channel_key ?? $k);
+                                $currentBalance = (float)($rows[0]->closing_balance ?? 0);
+                                $cashinEcashOpeningBalance = $currentBalance;
+                                $foundChannelRow = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!$foundChannelRow
+                        && strcasecmp($network, 'GHANAPAY') === 0
+                        && strcasecmp(trim((string)($postdata['sim_type'] ?? '')), 'Bank') === 0
+                        && function_exists('momoremits_find_prior_ecash_balance')) {
+                        $priorBalance = momoremits_find_prior_ecash_balance(
+                            $ecashTargetDrawerId,
+                            $ecashTargetUserId,
+                            $keysToTry
                         );
-                        if (!empty($rows)) {
-                            $resolvedKey = (string)($rows[0]->channel_key ?? $k);
-                            $currentBalance = (float)($rows[0]->closing_balance ?? 0);
-                            $foundChannelRow = true;
-                            break;
+                        if (!empty($priorBalance)) {
+                            $resolvedKey = (string)($priorBalance['channel_key'] ?? '');
+                            $currentBalance = (float)($priorBalance['closing_balance'] ?? 0);
+                            $cashinEcashOpeningBalance = $currentBalance;
+                            $foundChannelRow = $resolvedKey !== '';
                         }
                     }
 
@@ -446,7 +482,7 @@ if ($csrf && $momoremit->validate_insert($postdata)) {
                     }
 
                     if (!$foundChannelRow) {
-                        $momoremit->errors['balance_after_display'] = 'Current balance for channel ' . $resolvedKey . ' could not be found.';
+                        $momoremit->errors['balance_after_display'] = 'No current or prior cashdrawer balance was found for channel ' . $resolvedKey . '.';
                         set_value('errors', $momoremit->errors);
                         return;
                     }
@@ -829,7 +865,19 @@ if ($csrf && $momoremit->validate_insert($postdata)) {
                                 $ecashMovementAmount = ($txType === 'Cash in')
                                     ? (function_exists('momoremits_cashin_ecash_debit_amount') ? momoremits_cashin_ecash_debit_amount($postdata) : $amountSendable)
                                     : $transactionAmount;
-                                if ($ecashMovementAmount > 0 && !empty($network)) {
+                                if ($cashinSharedBankAccountKey !== null && $txType === 'Cash in') {
+                                    if (in_array(strtolower(trim($trans_status)), ['approved', 'sent'], true)) {
+                                        $ecashClosingBalance = momoremits_record_shared_ecash_debit(
+                                            $ecashDrawerId,
+                                            $ecashDrawerUserId,
+                                            (string)$cashinEcashChannelKey,
+                                            $cashinEcashOpeningBalance,
+                                            $ecashMovementAmount,
+                                            (int)$trans_id,
+                                            $trans_status
+                                        );
+                                    }
+                                } elseif ($ecashMovementAmount > 0 && !empty($network)) {
                                     $networkUpper = strtoupper($network);
                                     $ecashChannelKey = $cashinEcashChannelKey;
                                     $keysToTry = function_exists('momoremits_ecash_channel_candidates')
@@ -876,7 +924,7 @@ if ($csrf && $momoremit->validate_insert($postdata)) {
                                     $ecashDebit = $isEcashOut ? $ecashMovementAmount : 0;
 
                                     if (empty($rowsEcash)) {
-                                        $ecashOpening = 0;
+                                        $ecashOpening = $cashinEcashOpeningBalance;
                                         $ecashClosing = $ecashOpening + $ecashCredit - $ecashDebit;
                                         $ecashClosingBalance = $ecashClosing;
 
@@ -919,14 +967,23 @@ if ($csrf && $momoremit->validate_insert($postdata)) {
                             }
                         } catch (\Throwable $e) {
                             error_log('MOMOREMIT ECASH CASHDRAWER UPDATE FAILED: ' . $e->getMessage());
+                            if ($cashinSharedBankAccountKey !== null) {
+                                throw $e;
+                            }
                         }
                     }
                 } catch (\Throwable $e) {
                     error_log('MOMOREMIT CASHDRAWER UPDATE FAILED: ' . $e->getMessage());
+                    if ($cashinSharedBankAccountKey !== null) {
+                        throw $e;
+                    }
                 }
             }
         } catch (\Throwable $e) {
             error_log('MOMOREMIT CASHDRAWER SYNC FAILED: ' . $e->getMessage());
+            if ($cashinSharedBankAccountKey !== null) {
+                throw $e;
+            }
         }
 
         if ($ecashClosingBalance !== null) {

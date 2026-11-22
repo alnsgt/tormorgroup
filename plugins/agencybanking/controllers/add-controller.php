@@ -205,9 +205,7 @@
 			// Disable wallet side-effects; system no longer uses wallets
 			$useWalletSideEffects = false;
 
-			// Withdrawal policy:
-			// - Withdrawals are always Approved by default
-			// - No charge for withdrawals EXCEPT GHQR/GCB + Withdrawal (CIT)
+			// Withdrawals are approved by default; configured CIT bank channels may carry a charge.
 			$txTypeLower = strtolower($txTypeRaw);
 			$isWithdrawal = (stripos($txTypeRaw, 'withdrawal') !== false);
 			$withdrawalProvider = strtoupper(trim((string)$networkRaw));
@@ -234,25 +232,48 @@
 				return;
 			}
 
-			// GHQR Withdrawal (CIT): cap both plus/minus charge at GH₵20
+			// Apply the configured CIT charge to the requested amount, then derive the cash payout.
 			if ($isGhqrCitWithdrawal) {
 				$withdrawn = (float)($postdata['amount_withdrawn'] ?? 0);
-				$payable = (float)($postdata['amount_payable'] ?? 0);
+				$chargingType = strtolower(trim((string)($postdata['charging_type'] ?? 'minus')));
+				$chargingType = in_array($chargingType, ['plus', 'minus'], true) ? $chargingType : 'minus';
+				$postdata['charging_type'] = $chargingType;
 				$dynamicKey = $withdrawalProvider === 'GHQR'
 					? 'AGENCYBANKING WITHDRAWAL CIT GHQR'
 					: 'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY';
+				$sourceOption = trim((string)($postdata['sof_option'] ?? ''));
+				$sourceValue = trim((string)($postdata['cash_source'] ?? ''));
+				if ($sourceOption === '' && in_array($withdrawalProvider, ['GCB', 'FIDELITY BANK', 'FIDELITY'], true)) {
+					$sourceOption = 'Bank';
+				}
+				if ($sourceValue === '' && $withdrawalProvider === 'GCB') {
+					$sourceValue = 'GCB';
+				} elseif ($sourceValue === '' && in_array($withdrawalProvider, ['FIDELITY BANK', 'FIDELITY'], true)) {
+					$sourceValue = 'Fidelity';
+				}
 				$charge = function_exists('dynamic_charge_calculate')
 					? dynamic_charge_calculate([
 						'commission_type' => $dynamicKey,
 						'transaction_type' => $postdata['transaction_type'] ?? '',
 						'network' => $postdata['network'] ?? '',
-						'source_option' => $postdata['sof_option'] ?? '',
-						'source_value' => $postdata['cash_source'] ?? '',
-					], max($withdrawn, $payable))
+						'source_option' => $sourceOption,
+						'source_value' => $sourceValue,
+					], $withdrawn)
 					: (float)($postdata['charge'] ?? 0);
+				$charge = ceil($charge * 10 - 1e-9) / 10;
 				$postdata['charge'] = number_format($charge, 2, '.', '');
 				if ($withdrawn > 0) {
-					$postdata['amount_payable'] = number_format(max(0, $withdrawn - $charge), 2, '.', '');
+					$payable = $chargingType === 'plus'
+						? $withdrawn
+						: max(0, $withdrawn - $charge);
+					$postdata['amount_payable'] = number_format($payable, 2, '.', '');
+					$cashPaidOut = (float)($postdata['amount'] ?? 0);
+					if (abs($cashPaidOut - $payable) > 0.01) {
+						$agencybanking->errors['amount'] = 'Amount paid out must match the amount after applying the charge.';
+						message_fail($agencybanking->errors['amount']);
+						set_value('errors', array_merge($agencybanking->errors, $req->upload_errors));
+						return;
+					}
 				}
 			}
 
@@ -268,16 +289,10 @@
 						'source_value' => $postdata['destination_bank'] ?? $postdata['cash_source'] ?? '',
 					], $interbankLoad);
 				}
-				if ($charge > 0) {
-					$base = floor($charge);
-					$frac = $charge - $base;
-					if ($frac > 0.00001 && $frac < 0.5) {
-						$charge = $base + 0.5;
-					} elseif ($frac > 0.5) {
-						$charge = ceil($charge);
-					}
-					$postdata['charge'] = number_format((float)$charge, 2, '.', '');
-				}
+				$charge = max(0.0, (float)$charge);
+				$charge = $charge > 0 ? ceil($charge * 10 - 1e-9) / 10 : 0;
+				$postdata['charge'] = number_format($charge, 2, '.', '');
+				$postdata['amount_payable'] = number_format($interbankLoad + $charge, 2, '.', '');
 			}
 
 			// Capture transaction status (after any normalization)
@@ -529,19 +544,7 @@
 				$normalizedCharge = (float)($postdata['charge'] ?? 0);
 				$txTypeForCharge = strtolower(trim((string)($postdata['transaction_type'] ?? '')));
 				if ($normalizedCharge > 0 && ($txTypeForCharge !== '') && (strpos($txTypeForCharge, 'interbank') !== false || strpos($txTypeForCharge, 'gip') !== false)) {
-					// Cents-based rounding (precision-safe):
-					// - 0.01..0.49 => round up to .50
-					// - 0.51..0.99 => round up to next 1.00
-					// - keep .00 and .50 as-is
-					$cents = (int)round($normalizedCharge * 100);
-					$baseCents = (int)(floor($cents / 100) * 100);
-					$fracCents = $cents - $baseCents;
-					if ($fracCents > 0 && $fracCents < 50) {
-						$cents = $baseCents + 50;
-					} elseif ($fracCents > 50 && $fracCents < 100) {
-						$cents = $baseCents + 100;
-					}
-					$normalizedCharge = (float)number_format($cents / 100, 2, '.', '');
+					$normalizedCharge = ceil($normalizedCharge * 10 - 1e-9) / 10;
 					$postdata['charge'] = number_format((float)$normalizedCharge, 2, '.', '');
 				}
 				$normalizedAmountWithdrawn = $postdata['amount_withdrawn'] ?? null;
@@ -578,7 +581,7 @@
 					'nok_relation'     => $postdata['nok_relation']     ?? null,
 					'transaction_status'=> $postdata['transaction_status'] ?? null,
 					'charge'           => $normalizedCharge,
-					'cash_received_amount' => (float)($postdata['cash_received_amount'] ?? $postdata['amount_paid'] ?? 0),
+					'cash_received_amount' => (float)($postdata['cash_received_amount'] ?? $postdata['amount_paid'] ?? $postdata['paid'] ?? 0),
 					'change_required'  => (float)($postdata['change_required'] ?? 0),
 					'change_denominations' => $postdata['change_denominations'] ?? null,
 					'charging_type'    => $normalizedChargingType,
@@ -637,8 +640,7 @@
 			}
 
 			$chargeValue = (float)($postdata['charge'] ?? 0);
-			$isInterbankOrGipCharge = strpos((string)($txTypeForCharge ?? ''), 'interbank') !== false || strpos((string)($txTypeForCharge ?? ''), 'gip') !== false;
-			if ($chargeValue > 0 && !$isInterbankOrGipCharge) {
+			if ($chargeValue > 0) {
 				try {
 					$commissionDb = new \Core\Database;
 					$commissionDescription = 'AGENCYBANKING CHARGE | ' . ($postdata['network'] ?? '') . ' | ' . ($postdata['transaction_type'] ?? '') . ' | ID ' . ($postdata['id'] ?? '');

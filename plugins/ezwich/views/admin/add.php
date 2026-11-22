@@ -1,4 +1,6 @@
 <?php if(user_can('add_agencybanking')): ?>
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -30,7 +32,7 @@
 	 
 			<div class="mb-3 col-md-12 col-lg-6">
 				<label for="transaction_type" class="form-label">Transaction type</label>
-				<select class="form-select transaction_type" id="transaction_type" name="transaction_type" >
+				<select class="form-select transaction_type choice-badge-select" id="transaction_type" name="transaction_type" >
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_type','Withdrawal')?> value="Withdrawal">Withdrawal</option>
 				  <option <?=old_select('transaction_type','Transfer')?> value="Transfer">Transfer</option>
@@ -42,7 +44,7 @@
 	 
 			<div class="mb-3 col-md-12 col-lg-6">
 				<label for="network" class="form-label">Bank</label>
-				<select class="form-select" name="network" id="network">	
+				<select class="form-select choice-badge-select" name="network" id="network">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('network','GCB')?> value="GCB">GCB</option>
 				  <option <?=old_select('network','Zenit bank')?> value="Zenit bank">Zenit bank</option>
@@ -83,7 +85,7 @@
 
 			<div class="mb-3 col-md-12 col-lg-6 receiving d-none">
 			  <label for="receiving" class="form-label">Receiving sim</label>
-			  <select class="form-select" name="receiving" id="receiving">	
+			  <select class="form-select choice-badge-select" name="receiving" id="receiving">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transfer_to','Company sim')?> value="Company sim">Company sim</option>
 				  <option <?=old_select('transfer_to','Client sim')?> value="Client sim">Client sim</option>
@@ -128,7 +130,7 @@
 
 			<div class="mb-3 col-md-12 col-lg-6 transaction_status">
 			  <label for="transaction_status" class="form-label">Status</label>
-			  <select class="form-select transaction_status" name="transaction_status">
+			  <select class="form-select transaction_status choice-badge-select" name="transaction_status">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('transaction_status','Draft')?> value="Draft">Draft</option>
 				  <option <?=old_select('transaction_status','Pending')?> value="Pending">Pending</option>

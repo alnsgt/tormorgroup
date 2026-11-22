@@ -1,4 +1,6 @@
 <?php if(user_can('add_agencybanking')): ?>
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -111,7 +113,7 @@
 
 			<div class="col-md-12">
 				<label for="category" class="form-label">Category</label>
-				<select class="form-select category" id="category" name="category" >
+				<select class="form-select category choice-badge-select" id="category" name="category" >
 				  <option value="">---Select---</option>
 				  <option <?=old_select('category','UTILITY')?> value="UTILITY">UTILITY</option>
 				  <option <?=old_select('category','TV & ENTERTAINMENT')?> value="TV & ENTERTAINMENT">TV & ENTERTAINMENT</option>
@@ -125,7 +127,7 @@
 
 			<div class="col-md-12">
 				<label for="institution" class="form-label">Institution</label>
-				<select class="form-select" name="institution" id="institution" data-old="<?=esc(old_value('institution'))?>">	
+				<select class="form-select choice-badge-select" name="institution" id="institution" data-old="<?=esc(old_value('institution'))?>">
 				  <!-- Options dynamically display -->
 				</select>
 				<?php if(!empty($errors['institution'])): ?>
@@ -159,7 +161,7 @@
 
 			<div class="col-md-12 payment_medium">
 			  <label for="payment_medium" class="form-label">Payment Medium</label>
-			  <select class="form-select" name="payment_medium" id="payment_medium">	
+			  <select class="form-select choice-badge-select" name="payment_medium" id="payment_medium">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('payment_medium','Telecos')?> value="Telecos">Telecos</option>
 				  <option <?=old_select('payment_medium','Bank')?> value="Bank">Bank</option>
@@ -171,7 +173,7 @@
 
 			<div class="mb-2 telco d-none" id="telco-list">
 			  <label for="network" class="form-label">E-cash network</label>
-			  <select class="form-select" name="network" id="network">
+			  <select class="form-select choice-badge-select" name="network" id="network">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('network','MTN')?> value="MTN">MTN</option>
 				  <option <?=old_select('network','AT')?> value="AT">AT</option>
@@ -187,7 +189,7 @@
 
 			<div class="mb-2 bank d-none" id="bank-list">
 			  <label for="bank" class="form-label">Selected bank</label>
-			  <select class="form-select bank" name="bank">
+			  <select class="form-select bank choice-badge-select" name="bank">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('bank','ABSA')?> value="ABSA">ABSA</option>
 				  <option <?=old_select('bank','Access Bank')?> value="Access Bank">Access Bank</option>
@@ -222,7 +224,7 @@
 
 			<div class="mb-2 bank d-none" id="assigned-list">
 			  <label for="assigned_to" class="form-label">Assigned manager / user</label>
-			  <select class="form-select" name="assigned_to" id="assigned_to">
+			  <select class="form-select choice-badge-select" name="assigned_to" id="assigned_to">
 				  <option value="">---Select---</option>
 				  <?php foreach(($eligible_assignees ?? []) as $au): ?>
 					  <option <?=old_select('assigned_to', $au->id ?? '')?> value="<?=$au->id ?? ''?>"><?=esc(($au->first_name ?? '').' '.($au->last_name ?? ''))?></option>

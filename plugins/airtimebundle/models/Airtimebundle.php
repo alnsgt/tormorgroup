@@ -130,12 +130,10 @@ class Airtimebundle extends Model
 		$category = strtoupper(trim($data['category'] ?? ''));
 		$changeRequired = (float)($data['change_required'] ?? 0);
 		$cashReceivedAmount = (float)($data['cash_received_amount'] ?? 0);
-		$resolveNetPaidAmount = function(float $paidAmount) use ($cashReceivedAmount, $changeRequired): float {
+		$chargeAmount = max(0, (float)($data['commission'] ?? 0));
+		$resolveNetPaidAmount = function(float $paidAmount) use ($cashReceivedAmount, $changeRequired, $chargeAmount): float {
 			$receivedAmount = $cashReceivedAmount > 0 ? $cashReceivedAmount : $paidAmount;
-			if ($changeRequired > 0.01) {
-				return $receivedAmount - $changeRequired;
-			}
-			return $paidAmount;
+			return $receivedAmount - $changeRequired - $chargeAmount;
 		};
 		if($transactionType === 'DATA BUNDLE')
 		{
@@ -154,7 +152,7 @@ class Airtimebundle extends Model
 				}
 				if($loadAmount > 0 && $paidAmount > 0 && abs($netPaidAmount - $loadAmount) > 0.01)
 				{
-					$this->errors['mashup_paid'] = 'Amount paid must match load/amount';
+					$this->errors['mashup_paid'] = 'Amount paid, less charge and change, must match load/amount';
 				}
 			}
 			else if(in_array($category, ['5959', 'MTN UP2U', 'ISHARE', 'JUST4U']))
@@ -172,9 +170,7 @@ class Airtimebundle extends Model
 				}
 				if($loadAmount > 0 && $paidAmount > 0 && abs($netPaidAmount - $loadAmount) > 0.01)
 				{
-					$this->errors['special_amount_paid'] = ($category === 'JUST4U')
-						? 'Amount paid must match amount/load. GHS 0.50 is recorded as commission.'
-						: 'Amount paid must match amount/load';
+					$this->errors['special_amount_paid'] = 'Amount paid, less charge and change, must match amount/load';
 				}
 			}
 			else
@@ -190,9 +186,10 @@ class Airtimebundle extends Model
 				{
 					$this->errors['amount'] = 'Amount paid is required';
 				}
-				if($loadAmount > 0 && $paidAmount > 0 && abs($paidAmount - $loadAmount) > 0.01)
+				$netPaidAmount = $resolveNetPaidAmount($paidAmount);
+				if($loadAmount > 0 && $paidAmount > 0 && abs($netPaidAmount - $loadAmount) > 0.01)
 				{
-					$this->errors['amount'] = 'Amount paid must match load/amount';
+					$this->errors['amount'] = 'Amount paid, less charge and change, must match load/amount';
 				}
 			}
 		}

@@ -191,6 +191,10 @@ if ($transactionType === 'Airtime') {
 
         $postdata['amount'] = $postdata['special_amount_load'] ?? 0;
 
+    } elseif ($categoryUpper === 'STAFF BUNDLE') {
+        $postdata['amount'] = $postdata['staff_bundle_load'] ?? 0;
+        $postdata['amount_paid'] = $postdata['amount_paid'] ?? 0;
+        $postdata['amount_to_send'] = $postdata['amount'];
     } else {
 
         // For STAFF BUNDLE or other categories
@@ -269,12 +273,11 @@ if ($isMtnDataBundle && !$isJust4uCategory) {
 }
 if ($isJust4uCategory) {
 	$just4uLoadAmount = (float)($postdata['special_amount_load'] ?? ($postdata['amount'] ?? ($postdata['amount_to_send'] ?? 0)));
-	$just4uEcashPayable = max(0, $just4uLoadAmount - $just4uFixedCharge);
-	$postdata['amount_to_send'] = number_format($just4uEcashPayable, 2, '.', '');
+	$postdata['amount_to_send'] = number_format($just4uLoadAmount, 2, '.', '');
 	$postdata['special_amount_load'] = number_format($just4uLoadAmount, 2, '.', '');
 	$postdata['amount'] = number_format($just4uLoadAmount, 2, '.', '');
 	if (empty($postdata['special_amount_paid'])) {
-		$postdata['special_amount_paid'] = number_format($just4uLoadAmount, 2, '.', '');
+		$postdata['special_amount_paid'] = number_format($just4uLoadAmount + $just4uFixedCharge, 2, '.', '');
 	}
 	if (empty($postdata['amount_paid'])) {
 		$postdata['amount_paid'] = $postdata['special_amount_paid'];
@@ -283,6 +286,10 @@ if ($isJust4uCategory) {
 		$postdata['cash_received_amount'] = $postdata['special_amount_paid'];
 	}
 	$postdata['commission'] = number_format($just4uFixedCharge, 2, '.', '');
+} elseif ($isMtnDataBundle) {
+	$bundleLoadAmount = (float)($postdata['amount'] ?? ($postdata['amount_to_send'] ?? 0));
+	$postdata['amount_to_send'] = number_format($bundleLoadAmount, 2, '.', '');
+	$postdata['commission'] = number_format($mtnBundleCharge, 2, '.', '');
 } elseif ($isAirtimeEvdCategory) {
 	$evdLoadAmount = (float)($postdata['amount'] ?? ($postdata['amount_paid'] ?? 0));
 	$postdata['amount_to_send'] = number_format($evdLoadAmount, 2, '.', '');
@@ -293,7 +300,7 @@ if ($isJust4uCategory) {
 $mashupCategories = ['MASHUP', 'MTN-DATA', 'AT-DATA', 'TELECEL-DATA'];
 $specialCategories = ['5959', 'MTN UP2U', 'ISHARE', 'JUST4U'];
 $isAirtimeChangeEligible = ($transactionType === 'Airtime' && in_array($categoryUpper, ['AIRTIME', 'CREDIT TRANSFER', 'EVD'], true));
-$isBundleChangeEligible = ($transactionType !== 'Airtime' && (in_array($category, $mashupCategories, true) || in_array($category, $specialCategories, true)));
+$isBundleChangeEligible = ($transactionType !== 'Airtime' && (in_array($category, $mashupCategories, true) || in_array($category, $specialCategories, true) || $categoryUpper === 'STAFF BUNDLE'));
 $isChangeEligible = ($isAirtimeChangeEligible || $isBundleChangeEligible);
 $paidFieldKey = 'amount_paid';
 if (in_array($category, $mashupCategories, true)) {
@@ -302,17 +309,18 @@ if (in_array($category, $mashupCategories, true)) {
 	$paidFieldKey = 'special_amount_paid';
 }
 
-$payableAmount = 0.0;
+$baseLoadAmount = 0.0;
 if ($transactionType === 'Airtime') {
-	$payableAmount = (float)($postdata['amount'] ?? 0);
+	$baseLoadAmount = (float)($postdata['amount'] ?? 0);
 } elseif (in_array($category, $mashupCategories, true)) {
-	$payableAmount = (float)($postdata['mashup_amount'] ?? ($postdata['amount'] ?? 0));
+	$baseLoadAmount = (float)($postdata['mashup_amount'] ?? ($postdata['amount'] ?? 0));
 } elseif (in_array($category, $specialCategories, true)) {
-	$payableAmount = (float)($postdata['special_amount_load'] ?? ($postdata['amount'] ?? 0));
+	$baseLoadAmount = (float)($postdata['special_amount_load'] ?? ($postdata['amount'] ?? 0));
 } else {
-	$payableAmount = (float)($postdata['amount'] ?? 0);
+	$baseLoadAmount = (float)($postdata['amount'] ?? 0);
 }
-$payableAmount = (float)number_format($payableAmount, 2, '.', '');
+$baseLoadAmount = (float)number_format($baseLoadAmount, 2, '.', '');
+$payableAmount = (float)number_format($baseLoadAmount + (float)($postdata['commission'] ?? 0), 2, '.', '');
 
 $cashReceivedAmount = (float)($postdata['cash_received_amount'] ?? ($postdata['amount_paid'] ?? 0));
 $cashReceivedAmount = (float)number_format($cashReceivedAmount, 2, '.', '');
@@ -450,14 +458,14 @@ if ($csrf && $airtimebundle->validate_insert($postdata)) {
 
 			$postdata['cash_received_amount'] = number_format($cashReceivedAmount, 2, '.', '');
 			$postdata['amount_paid'] = number_format($cashReceivedAmount, 2, '.', '');
-			$postdata['amount'] = number_format($netTransactionAmount, 2, '.', '');
+			$postdata['amount'] = number_format(max(0, $netTransactionAmount - (float)($postdata['commission'] ?? 0)), 2, '.', '');
 			if ($changeRequired > 0.01) {
 				$postdata['change_required'] = number_format($changeRequired, 2, '.', '');
 				$postdata['change_denominations'] = json_encode($changeDenominations, JSON_UNESCAPED_SLASHES);
 			}
 		} else {
 			$postdata['amount_paid'] = number_format($cashReceivedAmount, 2, '.', '');
-			$postdata['amount'] = number_format($payableAmount, 2, '.', '');
+			$postdata['amount'] = number_format($baseLoadAmount, 2, '.', '');
 			$postdata['change_required'] = '0.00';
 			$postdata['change_denominations'] = '[]';
 		}
@@ -1167,9 +1175,9 @@ $categoryForCommission = strtoupper(trim((string)($postdata['category'] ?? '')))
 $networkForCommission = strtoupper(trim((string)($postdata['network'] ?? '')));
 
 
-if ($categoryForCommission === 'JUST4U') {
+if ($isJust4uCategory || $isMtnDataBundle) {
 
-$commissionAmount = 0.50;
+$commissionAmount = (float)($postdata['commission'] ?? 0);
 
 if ($commissionAmount > 0) {
 
@@ -1221,7 +1229,7 @@ $commissionInsert = [
 
 'amount' => $partAmount,
 
-'transaction_status' => 'Approved',
+'transaction_status' => $postdata['transaction_status'] ?? 'Approved',
 
 'created_by' => $user_id,
 
@@ -1300,14 +1308,16 @@ goto end_post;
 if (!$csrf) {
 
 $airtimebundle->errors['network'] = "Form expired!";
+message_fail($airtimebundle->errors['network']);
 
 } else {
 
 // Log validation errors for debugging
 
 error_log("Validation errors: " . json_encode($airtimebundle->errors));
-
 error_log("Postdata: " . json_encode($postdata));
+$validationErrors = array_values($airtimebundle->errors);
+message_fail((string)($validationErrors[0] ?? 'Transaction validation failed. Please review the form and try again.'));
 
 }
 

@@ -81,16 +81,48 @@
 
 			$postdata['created_by'] = $user_id;
 
-			// Ensure a meaningful amount is available for cashdrawer sync.
-			// For some ezwich flows, amount_payable holds the client-facing value
-			// while amount may remain zero if denominations are not captured yet.
-			$effectiveAmount = (float)($postdata['amount'] ?? 0);
-			if ($effectiveAmount <= 0 && !empty($postdata['amount_payable'])) {
-				$postdata['amount'] = (float)$postdata['amount_payable'];
+			$transferType = trim((string)($postdata['transfer_type'] ?? ''));
+			$isNetPayoutFlow = in_array($transferType, ['All', 'Full', 'Part'], true);
+			$postedCharge = (float)($postdata['charge'] ?? 0);
+			$chargeBase = $isNetPayoutFlow
+				? (float)($postdata['amount_requested'] ?? 0)
+				: (float)($postdata['amount'] ?? 0);
+			if (in_array($transferType, ['All', 'Full'], true)) {
+				$chargeBase = (float)($postdata['balance'] ?? 0);
+			}
+			if ($isNetPayoutFlow && $chargeBase <= 0) {
+				$chargeBase = (float)($postdata['amount'] ?? 0);
 			}
 			if (function_exists('dynamic_charge_calculate')) {
-				$chargeBase = (float)($postdata['amount'] ?? $postdata['amount_payable'] ?? 0);
-				$postdata['charge'] = dynamic_charge_calculate('EZWICH CHARGE', $chargeBase);
+				$calculatedCharge = dynamic_charge_calculate('EZWICH CHARGE', $chargeBase);
+			} else {
+				$calculatedCharge = $postedCharge;
+			}
+			$postdata['charge'] = ceil(round(max(0, (float)$calculatedCharge), 6) * 10) / 10;
+			$chargeSettings = (new \Settings\CommissionRate)->first(['commission_type' => 'EZWICH CHARGE']);
+			if (!empty($chargeSettings->is_capped)) {
+				$postdata['charge'] = min($postdata['charge'], max(0, (float)($chargeSettings->cap_value ?? 0)));
+			}
+			if ($isNetPayoutFlow && $chargeBase > 0) {
+				$netPayout = $chargeBase - (float)$postdata['charge'];
+				$postdata['amount_requested'] = number_format($chargeBase, 2, '.', '');
+				$postdata['amount_payable'] = number_format(max(0, $netPayout), 2, '.', '');
+				if ($netPayout <= 0) {
+					$ezwich->errors['amount'] = 'The charge must be less than the requested amount.';
+				} else {
+					if ((float)($postdata['amount'] ?? 0) <= 0) {
+						$postdata['amount'] = $netPayout;
+					}
+					if (round((float)($postdata['amount'] ?? 0)) !== round($netPayout)) {
+						$ezwich->errors['amount'] = 'Amount paid out must match the requested amount after deducting the charge.';
+					}
+				}
+				if (!empty($ezwich->errors['amount'])) {
+					message_fail($ezwich->errors['amount']);
+					set_value('errors', array_merge($ezwich->errors, $req->upload_errors));
+					redirect($admin_route . '/' . $plugin_route);
+					return;
+				}
 			}
 
 			// Cashdrawer is the primary accounting source: sync this ezwich transaction
@@ -161,7 +193,9 @@
 				return;
 			}
 
-			// Ezwich charges are recorded on the transaction only; they are not commissions.
+			if (!ezwich_sync_charge_commission((object)$insertData, (int)$user_id)) {
+				error_log('EZWICH CHARGE COMMISSION INSERT FAILED for transaction ' . (int)$postdata['id']);
+			}
 
 	        if ($currencyArray) {
 	            foreach ($currencyArray as $currency) {

@@ -31,7 +31,19 @@ class CommissionRate extends Model
      */
     public function getActive()
     {
-        return $this->where(['status' => 1])->orderBy('commission_type', 'ASC')->get();
+        $rates = $this->where(['status' => 1]);
+        if (!is_array($rates)) {
+            return [];
+        }
+
+        usort($rates, static function ($a, $b): int {
+            return strcmp(
+                (string)($a->commission_type ?? ''),
+                (string)($b->commission_type ?? '')
+            );
+        });
+
+        return $rates;
     }
 
     /**

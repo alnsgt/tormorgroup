@@ -755,6 +755,8 @@ add_filter('after_query',function($data){
  * Helper functions for Commission Rates
  */
 
+require_once __DIR__ . '/models/CommissionRate.php';
+
 if(!function_exists('dynamic_charge_service_registry')) {
 	function dynamic_charge_service_registry(): array
 	{

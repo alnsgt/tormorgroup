@@ -1,4 +1,6 @@
 <?php if(user_can('add_agencybanking') || user_can('edit_momoremit')):?>
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<link rel="stylesheet" href="<?=plugin_http_path('assets/css/agency-forms.css')?>?v=<?= (int)filemtime(__DIR__ . '/../../../assets/css/agency-forms.css') ?>">
 	<form method="post" enctype="multipart/form-data" class="agency-entry-form agency-account-opening-form">
 		<div class="row g-3 account-opening-card">
@@ -10,7 +12,7 @@
 			<?php if (!empty($row) && !empty($row->id)): ?>
 				<div class="mb-3">
 					<label for="transaction_status" class="form-label">Status</label>
-					<select class="form-select" name="transaction_status" id="transaction_status">
+					<select class="form-select choice-badge-select" name="transaction_status" id="transaction_status">
 						<option value="">---Select---</option>
 						<option <?=old_select('transaction_status','Draft', $row->transaction_status ?? '')?> value="Draft">Draft</option>
 						<option <?=old_select('transaction_status','Pending', $row->transaction_status ?? '')?> value="Pending">Pending</option>
@@ -46,7 +48,7 @@
 
 			<div class="mb-3">
 				<label for="network" class="form-label">Account opened</label>
-				<select class="form-select" name="network" id="network">
+				<select class="form-select choice-badge-select" name="network" id="network">
 					<option value="">---Select---</option>
 					<option <?=old_select('network','Ghanapay')?> value="Ghanapay">Ghanapay</option>
 					<option <?=old_select('network','Calbank')?> value="Calbank">Calbank</option>

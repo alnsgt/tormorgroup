@@ -1,10 +1,15 @@
 <?php
 $momoremitGhanaPayRate = (new \Settings\CommissionRate)->first(['commission_type' => 'MOMOREMIT GHANAPAY CASHIN']);
-$momoremitGhanaPayPercent = (float)($momoremitGhanaPayRate->commission_rate ?? 0.50) / 100;
+$momoremitGhanaPayChargeRate = (float)($momoremitGhanaPayRate->commission_rate ?? 0.50);
+$momoremitGhanaPayChargeType = strtolower((string)($momoremitGhanaPayRate->charge_type ?? 'percentage'));
+$momoremitGhanaPayPercent = $momoremitGhanaPayChargeRate / 100;
 $momoremitGhanaPayStarting = (float)($momoremitGhanaPayRate->starting_amount ?? 0);
 $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
+$momoremitGhanaPayIsCapped = !empty($momoremitGhanaPayRate->is_capped);
 ?>
 <?php if(user_can('add_momoremit')):?>
+	<link rel="stylesheet" href="<?=ROOT?>/assets/css/form-choice-badges.css">
+	<script src="<?=ROOT?>/assets/js/form-choice-badges.js" defer></script>
 	<style>
 		form {
 			margin-top: 40px !important;
@@ -120,7 +125,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 	    <!-- Transaction Type Selection -->
 	    <div class="mb-3 col-md-12">
 	      <label for="transaction_type" class="form-label">Transaction</label>
-	      <select class="form-select"  name="transaction_type">
+	      <select class="form-select choice-badge-select"  name="transaction_type">
 	        <option <?=old_select('transaction_type','Cash in')?> value="Cash in" selected>Cash in</option>
 	      </select>
 	      <?php if(!empty($errors['transaction_type'])):?>
@@ -131,7 +136,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 			<!-- Network Selection -->
 	    <div class="mb-3 col-md-12">
 	      <label for="network" class="form-label">Select Network</label>
-	      <select class="form-select" name="network" data-old="<?=esc(old_value('network'))?>">
+	      <select class="form-select choice-badge-select" name="network" data-old="<?=esc(old_value('network'))?>">
 	        <option value="">---Select---</option>
 	        <option value="MTN">MTN</option>
 	        <option value="TELECEL">TELECEL</option>
@@ -150,7 +155,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 
 			<div class="mb-3 col-md-12">
 				<label for="sending_category" class="form-label">Transaction type</label>
-				<select class="form-select" name="sending_category" id="sending_category" data-old="<?=esc(old_value('sending_category'))?>">
+				<select class="form-select choice-badge-select" name="sending_category" id="sending_category" data-old="<?=esc(old_value('sending_category'))?>">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('sending_category','Deposit')?> value="Deposit">Deposit</option>
 				  <option <?=old_select('sending_category','Sending')?> value="Sending">Sending</option>
@@ -162,7 +167,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 
 			<div class="mb-3 col-md-12">
 				<label for="sim_type" class="form-label">Sim type</label>
-				<select class="form-select" name="sim_type" id="sim_type" data-old="<?=esc(old_value('sim_type'))?>">
+				<select class="form-select choice-badge-select" name="sim_type" id="sim_type" data-old="<?=esc(old_value('sim_type'))?>">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('sim_type','Subscriber')?> value="Subscriber">Subscriber</option>
 				  <option <?=old_select('sim_type','Agent')?> value="Agent">Agent</option>
@@ -175,7 +180,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 
 			<div class="mb-3 col-md-12 bank_name d-none">
 				<label for="bank_name" class="form-label">Bank</label>
-				<select class="form-select" name="bank_name" id="bank_name" data-old="<?=esc(old_value('bank_name'))?>">
+				<select class="form-select choice-badge-select" name="bank_name" id="bank_name" data-old="<?=esc(old_value('bank_name'))?>">
 				  <option value="">---Select---</option>
 				</select>
 				<?php if(!empty($errors['bank_name'])):?>
@@ -186,7 +191,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 	    <!-- Charging type -->
 	    <div class="mb-3 col-md-12 charging_type">
 	      <label for="charging_type" class="form-label">Charging type</label>
-	      <select class="form-select" name="charging_type" id="charging_type">
+	      <select class="form-select choice-badge-select" name="charging_type" id="charging_type">
 				  <option value="">---Select---</option>
 				  <option <?=old_select('charging_type','+fee')?> value="+fee">+fee</option>
 				  <option <?=old_select('charging_type','-fee')?> value="-fee">-fee</option>
@@ -200,7 +205,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 	    <!-- Category Selection, dynamic options populated by JavaScript -->
 	    <div class="mb-3 col-md-12 category d-none">
 	      <label for="category" class="form-label">Sending type</label>
-	      <select class="form-select" name="category" id="category" data-old="<?=esc(old_value('category'))?>">
+	      <select class="form-select choice-badge-select" name="category" id="category" data-old="<?=esc(old_value('category'))?>">
 				  <option value="">---Select---</option>
 	      	<!-- Options will be displayed dynamc -->
 	      </select>
@@ -262,7 +267,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 	    </div>
 
     <div class="col-md-12">
-      <label for="amount_payable" class="form-label">Amount Payable (system generated)</label>
+      <label for="amount_payable" class="form-label">Total payable (includes charge)</label>
       <div class="input-group">
         <div id="currencySymbol" class="input-group-text">GH₵</div>
         <input name="amount_payable" value="<?=old_value('amount_payable')?>" type="text" class="form-control" id="amount_payable" placeholder="GH&cent;0.00" readonly>
@@ -270,7 +275,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
     </div>
 
     <div class="col-md-12">
-      <label for="amount_sendable" class="form-label">Amount to Send (e-cash deduction, system generated)</label>
+      <label for="amount_sendable" class="form-label">Net amount sent (e-cash deduction)</label>
       <div class="input-group">
         <div id="currencySymbol" class="input-group-text">GH₵</div>
         <input name="amount_sendable" value="<?=old_value('amount_sendable')?>" type="text" class="form-control" id="amount_sendable" placeholder="GH&cent;0.00" readonly>
@@ -384,6 +389,10 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
 
 	      <!-- Modal Body -->
 	      <div class="modal-body table-responsive">
+	        <div class="alert alert-info d-flex align-items-center justify-content-between gap-3 py-2 px-3 mb-2" role="status" aria-live="polite">
+	          <span>Amount payable (includes charge)</span>
+	          <strong id="cashinCalculatorPayable">GHS 0.00</strong>
+	        </div>
 	        <table class="table table-hover table-sm">
 	          <thead>
 	            <tr>
@@ -732,6 +741,18 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
         return roundMoney(value).toFixed(2);
       }
 
+      const calculatorPayableEl = document.getElementById('cashinCalculatorPayable');
+      function updateCalculatorPayable() {
+        if (calculatorPayableEl) {
+          calculatorPayableEl.textContent = `GHS ${formatMoney(amountPayableInput.value)}`;
+        }
+      }
+
+      const calculatorModalEl = document.getElementById('staticBackdrop');
+      if (calculatorModalEl) {
+        calculatorModalEl.addEventListener('show.bs.modal', updateCalculatorPayable);
+      }
+
       function valuesMatch(a, b) {
         return Math.abs(roundMoney(a) - roundMoney(b)) <= 0.01;
       }
@@ -869,6 +890,10 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
           'BANK_' + bankNormalized,
           bankNormalized,
         ] : [];
+        const bankAlias = bankNormalized.replace(/_BANK$/, '');
+        if (bankAlias && bankAlias !== bankNormalized) {
+          bankKeys.push('ECASH_' + bankAlias, 'BANK_' + bankAlias, bankAlias);
+        }
         const keysToTry = isMomoPay ? [
           'ECASH_MTN_MOMOPAY',
           'MTN_MOMOPAY',
@@ -1727,16 +1752,22 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
         const isBankSim = sim === 'bank';
         if (isGhanapay && isBankSim && amt > 0) {
           const ghanapayRate = <?=json_encode($momoremitGhanaPayPercent)?>;
+          const ghanapayChargeRate = <?=json_encode($momoremitGhanaPayChargeRate)?>;
+          const ghanapayChargeType = <?=json_encode($momoremitGhanaPayChargeType)?>;
           const ghanapayStarting = <?=json_encode($momoremitGhanaPayStarting)?>;
           const ghanapayCap = <?=json_encode($momoremitGhanaPayCap)?>;
-          let specialCharge = amt >= ghanapayStarting ? amt * ghanapayRate : 0;
-          if (ghanapayCap > 0) specialCharge = Math.min(specialCharge, ghanapayCap);
+          const ghanapayIsCapped = <?=json_encode($momoremitGhanaPayIsCapped)?>;
+          let specialCharge = amt >= ghanapayStarting
+            ? (ghanapayChargeType === 'flat' ? ghanapayChargeRate : amt * ghanapayRate)
+            : 0;
+          if (ghanapayIsCapped) specialCharge = Math.min(specialCharge, ghanapayCap);
           charge = round2(specialCharge);
           payable = round2(amt + charge);
           toSend = round2(amt);
           chargeInput.value = Number(charge || 0).toFixed(2);
           amountPayableInput.value = Number(payable || 0).toFixed(2);
           amountToSendInput.value = Number(toSend || 0).toFixed(2);
+          updateCalculatorPayable();
           validateSaveState();
           return;
         }
@@ -1816,6 +1847,7 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
         chargeInput.value = Number(charge || 0).toFixed(2);
         amountPayableInput.value = Number(payable || 0).toFixed(2);
         amountToSendInput.value = Number(toSend || 0).toFixed(2);
+        updateCalculatorPayable();
         validateSaveState();
       }
 
@@ -2006,10 +2038,8 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
       // restore selects and init visibility & calculation
       applyOldSelect(networkSelect);
       applyOldSelect(sendingType);
+      updateSimTypeOptions();
       applyOldSelect(simType);
-      if (bankSelect) {
-        applyOldSelect(bankSelect);
-      }
       updateCategoryOptions();
       applyOldSelect(categorySelect);
       restoreDenominations();
@@ -2017,6 +2047,9 @@ $momoremitGhanaPayCap = (float)($momoremitGhanaPayRate->cap_value ?? 0);
         amountInput.value = totalVolumeField.value;
       }
       showFields();
+      if (bankSelect) {
+        applyOldSelect(bankSelect);
+      }
       validateSender();
       if (cashReceivedAmountField && (!cashReceivedAmountField.value || roundMoney(cashReceivedAmountField.value) <= 0) && roundMoney(amountInput.value) > 0) {
         cashReceivedAmountField.value = formatMoney(amountInput.value);
