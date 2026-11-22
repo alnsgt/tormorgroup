@@ -103,6 +103,129 @@ unset($_SESSION['success_message']);
         min-width: 230px;
         border-radius: 12px;
     }
+    .commission-rates-shell .select2-container {
+        width: 100% !important;
+    }
+    .commission-rates-shell .select2-container--default .select2-selection--single,
+    .commission-rates-shell .select2-container--default .select2-selection--multiple {
+        min-height: 42px;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 8px;
+        background: var(--bs-body-bg);
+    }
+    .commission-rates-shell .select2-container--default .select2-selection--single {
+        display: flex;
+        align-items: center;
+        padding-right: 2.25rem;
+    }
+    .commission-rates-shell .select2-container--default .select2-selection--single .select2-selection__rendered {
+        color: var(--bs-body-color);
+        line-height: 40px;
+        padding-left: 12px;
+    }
+    .commission-rates-shell .select2-container--default .select2-selection--single .select2-selection__arrow {
+        height: 40px;
+    }
+    .commission-rates-shell .select2-container--default.select2-container--focus .select2-selection--single,
+    .commission-rates-shell .select2-container--default.select2-container--open .select2-selection--single,
+    .commission-rates-shell .select2-container--default.select2-container--focus .select2-selection--multiple {
+        border-color: var(--bs-primary);
+        box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.14);
+    }
+    .commission-rates-shell .select2-container--default .select2-selection--multiple .select2-selection__choice {
+        border: 1px solid rgba(13, 110, 253, 0.22);
+        border-radius: 999px;
+        background: rgba(13, 110, 253, 0.12);
+        color: #0d6efd;
+        margin-top: 7px;
+    }
+    .commission-rates-shell .select2-dropdown {
+        border: 1px solid var(--bs-border-color);
+        border-radius: 8px;
+        background: var(--bs-body-bg);
+        box-shadow: 0 14px 32px rgba(15, 23, 42, 0.18);
+    }
+    .rule-badge-picker {
+        min-height: 42px;
+        border: 1px solid var(--bs-border-color);
+        border-radius: 12px;
+        background: var(--bs-body-bg);
+        padding: 8px;
+    }
+    .rule-selected,
+    .rule-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .rule-selected:empty {
+        display: none;
+    }
+    .rule-selected-badge,
+    .rule-option {
+        border: 1px solid rgba(13, 110, 253, 0.24);
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        transition: all .15s ease;
+    }
+    .rule-selected-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 8px 5px 10px;
+        background: rgba(13, 110, 253, 0.12);
+        color: #0d6efd;
+    }
+    .rule-selected-badge button {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        line-height: 1;
+        padding: 0 2px;
+    }
+    .rule-option {
+        border-color: rgba(108, 117, 125, 0.22);
+        background: var(--bs-tertiary-bg);
+        color: var(--bs-body-color);
+        padding: 5px 10px;
+    }
+    .rule-option:hover,
+    .rule-option.active {
+        border-color: rgba(13, 110, 253, 0.45);
+        background: rgba(13, 110, 253, 0.12);
+        color: #0d6efd;
+    }
+    .rule-custom-input {
+        min-width: 150px;
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--bs-body-color);
+        font-size: 0.82rem;
+        padding: 4px 2px;
+    }
+    .advanced-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid rgba(13, 110, 253, 0.25);
+        background: rgba(13, 110, 253, 0.08);
+        color: #0d6efd;
+    }
+    .advanced-toggle:hover,
+    .advanced-toggle:focus {
+        border-color: rgba(13, 110, 253, 0.45);
+        background: rgba(13, 110, 253, 0.14);
+        color: #0d6efd;
+    }
+    .advanced-toggle .toggle-icon {
+        transition: transform .18s ease;
+    }
+    .advanced-toggle[aria-expanded="true"] .toggle-icon {
+        transform: rotate(180deg);
+    }
 </style>
 
 <div class="commission-rates-shell mx-auto p-3">
@@ -139,7 +262,7 @@ unset($_SESSION['success_message']);
                 <div class="d-flex justify-content-between align-items-start gap-3">
                     <div>
                         <div class="text-white-50 small text-uppercase fw-bold mb-2">Commission charge</div>
-                        <h3 class="mb-2"><?= esc($rate->commission_type) ?></h3>
+                        <h3 class="mb-2"><?= esc($rate->applies_to ?: $rate->commission_type) ?></h3>
                         <div class="fs-2 fw-bold"><?= esc($chargeLabel) ?></div>
                     </div>
                     <span class="status-badge <?= !empty($rate->status) ? 'status-active' : 'status-inactive' ?>">
@@ -150,6 +273,21 @@ unset($_SESSION['success_message']);
         </div>
 
         <div class="row g-3 mb-4">
+            <?php
+                $ruleParts = [];
+                if (!empty($rate->transaction_type)) $ruleParts[] = 'Type: ' . $rate->transaction_type;
+                if (!empty($rate->network)) $ruleParts[] = 'Network: ' . $rate->network;
+                if (!empty($rate->source_option)) $ruleParts[] = 'Source: ' . $rate->source_option;
+                if (!empty($rate->source_value)) $ruleParts[] = 'Bank/Value: ' . $rate->source_value;
+            ?>
+            <?php if (!empty($ruleParts)): ?>
+            <div class="col-12">
+                <div class="commission-stat p-3">
+                    <small class="text-muted d-block">Applies when</small>
+                    <strong><?= esc(implode(' | ', $ruleParts)) ?></strong>
+                </div>
+            </div>
+            <?php endif; ?>
             <div class="col-sm-6 col-lg-3">
                 <div class="commission-stat p-3 h-100">
                     <small class="text-muted d-block">Charge type</small>
@@ -205,21 +343,96 @@ unset($_SESSION['success_message']);
                 <form method="POST" action="<?= ROOT . '/' . $admin_route . '/' . $plugin_route . '/' . $charge_route . '/' . (URL(3) === 'add' ? 'add' : $rate->id) ?>" class="needs-validation">
 
                     <div class="row g-4">
-                        <!-- Commission Type -->
+                        <!-- User-friendly charge category -->
                         <div class="col-md-6">
-                            <label for="commission_type" class="form-label fw-bold">Commission Type <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="commission_type" name="commission_type" 
-                                value="<?= esc($rate->commission_type ?? old_value('commission_type', '', 'post')) ?>"
-                                placeholder="e.g., MTN EVD, Telecel Cashout" required
-                                list="commission_types">
-                            <datalist id="commission_types">
-                                <?php foreach ($predefined_types as $type): ?>
-                                    <option value="<?= esc($type) ?>">
+                            <?php
+                                $commissionOptions = function_exists('dynamic_charge_service_registry')
+                                    ? dynamic_charge_service_registry()
+                                    : [];
+                                $selectedCommissionType = $rate->commission_type ?? old_value('commission_type', '', 'post');
+                            ?>
+                            <label for="commission_type" class="form-label fw-bold">Service <span class="text-danger">*</span></label>
+                            <select class="form-select" id="commission_type" name="commission_type" required>
+                                <option value="">---Select a service---</option>
+                                <?php foreach ($commissionOptions as $option): ?>
+                                    <?php $optionKey = (string)($option['key'] ?? ''); ?>
+                                    <option value="<?= esc($optionKey) ?>" <?= strcasecmp((string)$selectedCommissionType, $optionKey) === 0 ? 'selected' : '' ?>>
+                                        <?= esc($option['label'] ?? $optionKey) ?>
+                                    </option>
                                 <?php endforeach; ?>
-                            </datalist>
+                                <?php
+                                    $knownKeys = array_map(fn($option) => (string)($option['key'] ?? ''), $commissionOptions);
+                                ?>
+                                <?php if ($selectedCommissionType && !in_array($selectedCommissionType, $knownKeys, true)): ?>
+                                    <option value="<?= esc($selectedCommissionType) ?>" selected><?= esc($selectedCommissionType) ?></option>
+                                <?php endif; ?>
+                            </select>
                             <small class="text-muted d-block mt-1">
-                                <i class="fa-solid fa-info-circle me-1"></i> Predefined: <?= implode(', ', array_slice($predefined_types, 0, 3)) ?>...
+                                <i class="fa-solid fa-circle-check me-1"></i> Select the service the charge belongs to
                             </small>
+                        </div>
+
+                        <?php
+                            $advancedOptionsOpen = !empty($rate->transaction_type)
+                                || !empty($rate->network)
+                                || !empty($rate->source_option)
+                                || !empty($rate->source_value)
+                                || !empty(old_value('transaction_type', '', 'post'))
+                                || !empty(old_value('network', '', 'post'))
+                                || !empty(old_value('source_option', '', 'post'))
+                                || !empty(old_value('source_value', '', 'post'));
+                        ?>
+                        <div class="col-12">
+                            <button type="button"
+                                class="btn advanced-toggle rounded-pill px-3"
+                                data-bs-toggle="collapse"
+                                data-bs-target="#commissionAdvancedOptions"
+                                aria-expanded="<?= $advancedOptionsOpen ? 'true' : 'false' ?>"
+                                aria-controls="commissionAdvancedOptions">
+                                <i class="fa-solid fa-sliders"></i>
+                                <span>Advanced Options</span>
+                                <i class="fa-solid fa-chevron-down toggle-icon small"></i>
+                            </button>
+                        </div>
+
+                        <div class="col-12 collapse <?= $advancedOptionsOpen ? 'show' : '' ?>" id="commissionAdvancedOptions">
+                            <div class="border rounded-3 p-3 bg-light bg-opacity-10">
+                                <h6 class="fw-bold mb-3"><i class="fa-solid fa-filter me-2 text-primary"></i>Charge applies only when these selections match</h6>
+                                <div class="row g-3">
+                                    <div class="col-md-6 col-lg-3 advanced-rule-field" data-rule-column="transaction_type">
+                                        <label class="form-label fw-bold">Transaction Type</label>
+                                        <div class="rule-badge-picker" data-rule-field="transaction_type"
+                                            data-selected="<?= esc($rate->transaction_type ?? old_value('transaction_type', '', 'post')) ?>"
+                                            data-options='<?= esc(json_encode(['Withdrawal (AIT)', 'Withdrawal (CIT)', 'Interbank', 'Cash in', 'Data bundle', 'Airtime'])) ?>'></div>
+                                    </div>
+                                    <div class="col-md-6 col-lg-3 advanced-rule-field" data-rule-column="network">
+                                        <label class="form-label fw-bold">Network / Provider</label>
+                                        <div class="rule-badge-picker" data-rule-field="network"
+                                            data-selected="<?= esc($rate->network ?? old_value('network', '', 'post')) ?>"
+                                            data-options='<?= esc(json_encode(['GHANAPAY', 'MTN', 'TELECEL', 'AT', 'Ecobank', 'GCB', 'GhQR', 'G-MONEY', 'ZEEPAY'])) ?>'>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 col-lg-3 advanced-rule-field" data-rule-column="source_option">
+                                        <label class="form-label fw-bold">Source Type</label>
+                                        <div class="rule-badge-picker" data-rule-field="source_option"
+                                            data-selected="<?= esc($rate->source_option ?? old_value('source_option', '', 'post')) ?>"
+                                            data-options='<?= esc(json_encode(['Telco', 'Bank', 'Sim Type', 'Category'])) ?>'>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6 col-lg-3 advanced-rule-field" data-rule-column="source_value">
+                                        <label class="form-label fw-bold">Source / Bank</label>
+                                        <div class="rule-badge-picker" data-rule-field="source_value"
+                                            data-selected="<?= esc($rate->source_value ?? old_value('source_value', '', 'post')) ?>"
+                                            data-options='<?= esc(json_encode(['GHANAPAY', 'MTN', 'TELECEL', 'Ecobank', 'GCB', 'JUST4U', 'MTN-DATA', 'MASHUP', 'Subscriber', 'Agent', 'Merchant'])) ?>'>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="text-muted small d-none mt-2" id="advancedNoRules">
+                                    <i class="fa-solid fa-circle-info me-1"></i>
+                                    This service does not require extra matching options.
+                                </div>
+                                <small class="text-muted d-block mt-3">Leave a condition empty to apply to all values. Select multiple badges to allow alternatives, or type a custom value and press Enter.</small>
+                            </div>
                         </div>
 
                         <!-- Commission Rate -->
@@ -384,7 +597,7 @@ unset($_SESSION['success_message']);
                     <table class="table table-hover align-middle mb-0 commission-table" id="commissionTable">
                         <thead class="bg-light text-uppercase fs-7 text-muted">
                             <tr>
-                                <th class="py-3 ps-3">Commission Type</th>
+                                <th class="py-3 ps-3">Service</th>
                                 <th class="text-center py-3">Rate / Capped</th>
                                 <th class="text-end py-3">Starting / Cap Amount</th>
                                 <th class="text-center py-3">Expected / Status</th>
@@ -406,7 +619,19 @@ unset($_SESSION['success_message']);
                                                 <div class="commission-type-mark">
                                                     <i class="fa-solid fa-tags"></i>
                                                 </div>
-                                                <span><?= esc($r->commission_type ?? '') ?></span>
+                                                <span>
+                                                    <?= esc($r->applies_to ?: ($r->commission_type ?? '')) ?>
+                                                    <?php
+                                                        $ruleParts = [];
+                                                        if (!empty($r->transaction_type)) $ruleParts[] = $r->transaction_type;
+                                                        if (!empty($r->network)) $ruleParts[] = $r->network;
+                                                        if (!empty($r->source_option)) $ruleParts[] = $r->source_option;
+                                                        if (!empty($r->source_value)) $ruleParts[] = $r->source_value;
+                                                    ?>
+                                                    <?php if (!empty($ruleParts)): ?>
+                                                        <small class="text-primary d-block"><?= esc(implode(' / ', $ruleParts)) ?></small>
+                                                    <?php endif; ?>
+                                                </span>
                                             </div>
                                         </td>
                                         <td class="text-center">
@@ -489,6 +714,177 @@ unset($_SESSION['success_message']);
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+        const serviceProfiles = <?= json_encode(function_exists('dynamic_charge_service_registry') ? dynamic_charge_service_registry() : [], JSON_UNESCAPED_SLASHES) ?>;
+        const serviceProfileByKey = Object.fromEntries(
+            serviceProfiles.map(function(service) {
+                return [service.key, service.rules || {}];
+            })
+        );
+        const advancedCollapse = document.getElementById('commissionAdvancedOptions');
+        const advancedToggle = document.querySelector('[data-bs-target="#commissionAdvancedOptions"]');
+        if (advancedCollapse && advancedToggle) {
+            advancedCollapse.addEventListener('shown.bs.collapse', function() {
+                advancedToggle.setAttribute('aria-expanded', 'true');
+            });
+            advancedCollapse.addEventListener('hidden.bs.collapse', function() {
+                advancedToggle.setAttribute('aria-expanded', 'false');
+            });
+        }
+
+        const canUseSelect2 = window.jQuery && window.jQuery.fn && window.jQuery.fn.select2;
+        if (canUseSelect2) {
+            window.jQuery('#commission_type, #charge_type').select2({
+                width: '100%',
+                minimumResultsForSearch: 0,
+                dropdownAutoWidth: true
+            });
+        }
+
+        document.querySelectorAll('.rule-badge-picker').forEach(function(picker) {
+            let options = [];
+            try {
+                options = JSON.parse(picker.dataset.options || '[]');
+            } catch (error) {
+                options = [];
+            }
+
+            let selected = (picker.dataset.selected || '')
+                .split(',')
+                .map(function(value) { return value.trim(); })
+                .filter(Boolean);
+            selected = selected.filter(function(value, index) {
+                return selected.findIndex(function(item) {
+                    return item.toLowerCase() === value.toLowerCase();
+                }) === index;
+            });
+
+            const hidden = document.createElement('input');
+            hidden.type = 'hidden';
+            hidden.name = picker.dataset.ruleField;
+            picker.appendChild(hidden);
+
+            const selectedWrap = document.createElement('div');
+            selectedWrap.className = 'rule-selected';
+            const optionsWrap = document.createElement('div');
+            optionsWrap.className = 'rule-options';
+            const customInput = document.createElement('input');
+            customInput.type = 'text';
+            customInput.className = 'rule-custom-input';
+            customInput.placeholder = 'Other value, then Enter';
+
+            picker.appendChild(selectedWrap);
+            picker.appendChild(optionsWrap);
+            picker.appendChild(customInput);
+
+            const isSelected = function(value) {
+                return selected.some(function(item) {
+                    return item.toLowerCase() === value.toLowerCase();
+                });
+            };
+
+            const sync = function() {
+                hidden.value = selected.join(', ');
+                selectedWrap.innerHTML = '';
+                selected.forEach(function(value) {
+                    const badge = document.createElement('span');
+                    badge.className = 'rule-selected-badge';
+                    badge.appendChild(document.createTextNode(value));
+                    const remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.title = 'Remove ' + value;
+                    remove.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+                    remove.addEventListener('click', function() {
+                        selected = selected.filter(function(item) {
+                            return item.toLowerCase() !== value.toLowerCase();
+                        });
+                        sync();
+                    });
+                    badge.appendChild(remove);
+                    selectedWrap.appendChild(badge);
+                });
+
+                optionsWrap.innerHTML = '';
+                options.forEach(function(value) {
+                    if (isSelected(value)) return;
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'rule-option';
+                    button.textContent = value;
+                    button.addEventListener('click', function() {
+                        if (!isSelected(value)) selected.push(value);
+                        sync();
+                    });
+                    optionsWrap.appendChild(button);
+                });
+            };
+
+            customInput.addEventListener('keydown', function(event) {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                const value = customInput.value.trim();
+                if (value && !isSelected(value)) {
+                    selected.push(value);
+                    customInput.value = '';
+                    sync();
+                }
+            });
+
+            picker.resetBadgePicker = function(nextOptions, preserveSelected) {
+                options = nextOptions.filter(function(value, index) {
+                    return nextOptions.findIndex(function(item) {
+                        return item.toLowerCase() === value.toLowerCase();
+                    }) === index;
+                });
+                if (!preserveSelected) {
+                    selected = [];
+                } else {
+                    selected = selected.filter(function(value) {
+                        return options.some(function(option) {
+                            return option.toLowerCase() === value.toLowerCase();
+                        });
+                    });
+                }
+                sync();
+            };
+
+            sync();
+        });
+
+        const serviceSelect = document.getElementById('commission_type');
+        const ruleFields = document.querySelectorAll('.advanced-rule-field');
+        const advancedNoRules = document.getElementById('advancedNoRules');
+
+        const updateAdvancedOptions = function(preserveSelected) {
+            const service = serviceSelect ? serviceSelect.value : '';
+            const active = serviceProfileByKey[service] || null;
+
+            ruleFields.forEach(function(column) {
+                const field = column.dataset.ruleColumn;
+                const picker = column.querySelector('.rule-badge-picker');
+                const options = active && active[field] ? active[field] : [];
+                column.classList.toggle('d-none', options.length === 0);
+                if (picker && typeof picker.resetBadgePicker === 'function') {
+                    picker.resetBadgePicker(options, preserveSelected);
+                }
+            });
+            if (advancedNoRules) {
+                advancedNoRules.classList.toggle('d-none', !!active);
+            }
+        };
+
+        if (serviceSelect) {
+            updateAdvancedOptions(true);
+            if (window.jQuery && window.jQuery.fn && window.jQuery.fn.select2) {
+                window.jQuery(serviceSelect).on('change', function() {
+                    updateAdvancedOptions(false);
+                });
+            } else {
+                serviceSelect.addEventListener('change', function() {
+                    updateAdvancedOptions(false);
+                });
+            }
+        }
+
         const isCapped = document.getElementById('is_capped');
         const capWrapper = document.getElementById('cap_value_wrapper');
         const capValue = document.getElementById('cap_value');

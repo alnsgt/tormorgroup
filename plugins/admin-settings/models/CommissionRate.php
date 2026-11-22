@@ -10,6 +10,11 @@ class CommissionRate extends Model
     protected $table = 'commission_rates';
     protected $fillable = [
         'commission_type',
+        'applies_to',
+        'transaction_type',
+        'network',
+        'source_option',
+        'source_value',
         'charge_type',
         'commission_rate',
         'starting_amount',

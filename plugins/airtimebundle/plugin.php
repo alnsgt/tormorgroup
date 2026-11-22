@@ -21,6 +21,25 @@ set_value([
 
 ]);
 
+if(!function_exists('airtimebundle_charge_service_options')){
+	function airtimebundle_charge_service_options(): array
+	{
+		return [
+			[
+				'key' => 'MTN DATA BUNDLE',
+				'label' => 'MTN Data Bundle',
+				'plugin' => 'airtimebundle',
+				'rules' => [
+					'transaction_type' => ['Data bundle'],
+					'network' => ['MTN'],
+					'source_option' => ['Category'],
+					'source_value' => ['JUST4U', 'MTN-DATA', 'MASHUP', '5959', 'ISHARE', 'STAFF BUNDLE', 'MTN UP2U'],
+				],
+			],
+		];
+	}
+}
+
 if(!function_exists('airtimebundle_json_response')){
 	function airtimebundle_json_response(array $payload, int $status = 200): void
 	{

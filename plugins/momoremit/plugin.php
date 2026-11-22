@@ -25,6 +25,23 @@ set_value([
 
 ]);
 
+if(!function_exists('momoremit_charge_service_options')){
+	function momoremit_charge_service_options(): array
+	{
+		return [[
+			'key' => 'MOMOREMIT GHANAPAY CASHIN',
+			'label' => 'MoMoRemit GhanaPay Cash-in',
+			'plugin' => 'momoremit',
+			'rules' => [
+				'transaction_type' => ['Cash in'],
+				'network' => ['GHANAPAY', 'MTN', 'TELECEL', 'AT', 'ZEEPAY', 'G-MONEY'],
+				'source_option' => ['Bank', 'Sim Type'],
+				'source_value' => ['GHANAPAY', 'MTN', 'TELECEL', 'Ecobank', 'GCB', 'Subscriber', 'Agent', 'Merchant'],
+			],
+		]];
+	}
+}
+
 
 /** check if all tables exist **/
 $db = new \Core\Database;

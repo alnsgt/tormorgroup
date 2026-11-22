@@ -21,6 +21,46 @@ set_value([
 
 ]);
 
+if(!function_exists('agencybanking_charge_service_options')){
+	function agencybanking_charge_service_options(): array
+	{
+		return [
+			[
+				'key' => 'AGENCYBANKING WITHDRAWAL CIT GHQR',
+				'label' => 'Agency Banking - Withdrawal CIT (GhQR)',
+				'plugin' => 'agencybanking',
+				'rules' => [
+					'transaction_type' => ['Withdrawal (CIT)'],
+					'network' => ['GhQR', 'GCB', 'Calbank', 'Ecobank', 'Fidelity Bank'],
+					'source_option' => ['Telco', 'Bank'],
+					'source_value' => ['GHANAPAY', 'MTN', 'TELECEL', 'G-MONEY', 'ZEEPAY', 'Ecobank', 'GCB', 'Calbank', 'Fidelity'],
+				],
+			],
+			[
+				'key' => 'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY',
+				'label' => 'Agency Banking - Withdrawal CIT (GCB/Fidelity)',
+				'plugin' => 'agencybanking',
+				'rules' => [
+					'transaction_type' => ['Withdrawal (CIT)'],
+					'network' => ['GhQR', 'GCB', 'Calbank', 'Ecobank', 'Fidelity Bank'],
+					'source_option' => ['Telco', 'Bank'],
+					'source_value' => ['GHANAPAY', 'MTN', 'TELECEL', 'G-MONEY', 'ZEEPAY', 'Ecobank', 'GCB', 'Calbank', 'Fidelity'],
+				],
+			],
+			[
+				'key' => 'AGENCYBANKING INTERBANK',
+				'label' => 'Agency Banking - Interbank',
+				'plugin' => 'agencybanking',
+				'rules' => [
+					'transaction_type' => ['Interbank'],
+					'source_option' => ['Bank'],
+					'source_value' => ['ABSA', 'Access Bank', 'ADB', 'APEX BANK', 'Bank of Africa', 'CBG', 'Cal Bank', 'Ecobank', 'Fidelity', 'GCB', 'NIB', 'Republic Bank', 'Stanbic Bank'],
+				],
+			],
+		];
+	}
+}
+
 if(!function_exists('agencybanking_json_response')){
 	function agencybanking_json_response(array $payload, int $status = 200): void
 	{

@@ -242,7 +242,13 @@
 					? 'AGENCYBANKING WITHDRAWAL CIT GHQR'
 					: 'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY';
 				$charge = function_exists('dynamic_charge_calculate')
-					? dynamic_charge_calculate($dynamicKey, max($withdrawn, $payable))
+					? dynamic_charge_calculate([
+						'commission_type' => $dynamicKey,
+						'transaction_type' => $postdata['transaction_type'] ?? '',
+						'network' => $postdata['network'] ?? '',
+						'source_option' => $postdata['sof_option'] ?? '',
+						'source_value' => $postdata['cash_source'] ?? '',
+					], max($withdrawn, $payable))
 					: (float)($postdata['charge'] ?? 0);
 				$postdata['charge'] = number_format($charge, 2, '.', '');
 				if ($withdrawn > 0) {
@@ -254,7 +260,13 @@
 				$charge = (float)($postdata['charge'] ?? 0);
 				$interbankLoad = (float)($postdata['amount'] ?? $postdata['amount_load'] ?? 0);
 				if (function_exists('dynamic_charge_calculate')) {
-					$charge = dynamic_charge_calculate('AGENCYBANKING INTERBANK', $interbankLoad);
+					$charge = dynamic_charge_calculate([
+						'commission_type' => 'AGENCYBANKING INTERBANK',
+						'transaction_type' => $postdata['transaction_type'] ?? '',
+						'network' => $postdata['network'] ?? '',
+						'source_option' => $postdata['sof_option'] ?? '',
+						'source_value' => $postdata['destination_bank'] ?? $postdata['cash_source'] ?? '',
+					], $interbankLoad);
 				}
 				if ($charge > 0) {
 					$base = floor($charge);

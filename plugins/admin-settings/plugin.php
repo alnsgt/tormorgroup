@@ -755,6 +755,41 @@ add_filter('after_query',function($data){
  * Helper functions for Commission Rates
  */
 
+if(!function_exists('dynamic_charge_service_registry')) {
+	function dynamic_charge_service_registry(): array
+	{
+		$registry = [];
+		$providers = [
+			'ezwich_charge_service_options',
+			'momoremit_charge_service_options',
+			'agencybanking_charge_service_options',
+			'airtimebundle_charge_service_options',
+		];
+		foreach($providers as $provider){
+			if(!function_exists($provider)){
+				continue;
+			}
+			$services = $provider();
+			if(!is_array($services)){
+				continue;
+			}
+			foreach($services as $service){
+				$key = trim((string)($service['key'] ?? ''));
+				if($key === ''){
+					continue;
+				}
+				$registry[$key] = [
+					'key' => $key,
+					'label' => trim((string)($service['label'] ?? $key)),
+					'plugin' => trim((string)($service['plugin'] ?? '')),
+					'rules' => is_array($service['rules'] ?? null) ? $service['rules'] : [],
+				];
+			}
+		}
+		return array_values($registry);
+	}
+}
+
 if(!function_exists('get_commission_rate')) {
 	function get_commission_rate($commission_type) {
 		$commissionRate = new \Settings\CommissionRate;
@@ -826,14 +861,73 @@ if(!function_exists('calculate_commission')) {
 if(!function_exists('dynamic_charge_calculate')) {
 	/**
 	 * Calculate a configured dynamic charge by transaction key.
-	 * Keys are exact commission_type values in commission_rates.
+	 * An array context can narrow matching with transaction_type, network,
+	 * source_option, and source_value.
 	 */
-	function dynamic_charge_calculate(string $commissionType, float $amount): float
+	if(!function_exists('dynamic_charge_rule_matches')) {
+	function dynamic_charge_rule_matches(string $ruleValue, string $contextValue): bool
 	{
-		if(function_exists('get_commission_rate')){
-			$rate = get_commission_rate($commissionType);
-		}else{
-			$rate = null;
+		$ruleValue = trim($ruleValue);
+		$contextValue = trim($contextValue);
+		if($ruleValue === ''){
+			return true;
+		}
+		if($contextValue === ''){
+			return false;
+		}
+
+		$allowedValues = preg_split('/[,;|]/', $ruleValue) ?: [];
+		foreach($allowedValues as $allowedValue){
+			$allowedValue = trim($allowedValue);
+			if($allowedValue !== '' && strcasecmp($allowedValue, $contextValue) === 0){
+				return true;
+			}
+		}
+		return false;
+	}
+	}
+
+	function dynamic_charge_calculate($commissionType, float $amount): float
+	{
+		$context = is_array($commissionType) ? $commissionType : ['commission_type' => $commissionType];
+		$commissionKey = trim((string)($context['commission_type'] ?? ''));
+		$rate = null;
+
+		if(function_exists('get_all_commission_rates')){
+			foreach(get_all_commission_rates(true) as $candidate){
+				$hasRules = !empty($candidate->transaction_type)
+					|| !empty($candidate->network)
+					|| !empty($candidate->source_option)
+					|| !empty($candidate->source_value);
+
+				if($hasRules){
+					$matches = true;
+					$candidateKey = trim((string)($candidate->commission_type ?? ''));
+					if($commissionKey !== '' && $candidateKey !== '' && strcasecmp($candidateKey, $commissionKey) !== 0){
+						continue;
+					}
+					foreach([
+						'transaction_type' => 'transaction_type',
+						'network' => 'network',
+						'source_option' => 'source_option',
+						'source_value' => 'source_value',
+					] as $field => $contextField){
+						$ruleValue = trim((string)($candidate->{$field} ?? ''));
+						if(!dynamic_charge_rule_matches($ruleValue, trim((string)($context[$contextField] ?? '')))){
+							$matches = false;
+							break;
+						}
+					}
+					if($matches){
+						$rate = $candidate;
+						break;
+					}
+				}
+			}
+		}
+
+		if(!$rate && $commissionKey !== '' && function_exists('get_commission_rate')){
+			$rate = get_commission_rate($commissionKey);
 		}
 		if(!$rate || empty($rate->status)){
 			return 0.0;
@@ -866,6 +960,11 @@ if(!function_exists('dynamic_charge_ensure_defaults')) {
 				$db->query("CREATE TABLE IF NOT EXISTS commission_rates (
 					id INT(11) NOT NULL AUTO_INCREMENT,
 					commission_type VARCHAR(255) NOT NULL,
+					applies_to VARCHAR(255) DEFAULT NULL,
+					transaction_type VARCHAR(255) DEFAULT NULL,
+					network VARCHAR(255) DEFAULT NULL,
+					source_option VARCHAR(255) DEFAULT NULL,
+					source_value VARCHAR(255) DEFAULT NULL,
 					charge_type VARCHAR(20) NOT NULL DEFAULT 'percentage',
 					commission_rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
 					starting_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -884,6 +983,11 @@ if(!function_exists('dynamic_charge_ensure_defaults')) {
 				$columns = [
 					'charge_type' => "VARCHAR(20) NOT NULL DEFAULT 'percentage'",
 					'starting_amount' => 'DECIMAL(10,2) NOT NULL DEFAULT 0.00',
+					'applies_to' => 'VARCHAR(255) DEFAULT NULL',
+					'transaction_type' => 'VARCHAR(255) DEFAULT NULL',
+					'network' => 'VARCHAR(255) DEFAULT NULL',
+				 'source_option' => 'VARCHAR(255) DEFAULT NULL',
+				 'source_value' => 'VARCHAR(255) DEFAULT NULL',
 				];
 				foreach($columns as $column => $type){
 					$exists = $db->query(
@@ -898,22 +1002,23 @@ if(!function_exists('dynamic_charge_ensure_defaults')) {
 			}
 
 			$defaults = [
-				'EZWICH CHARGE' => ['percentage', 0.10, 1430.00, 1, 50.00],
-				'MTN DATA BUNDLE' => ['flat', 0.50, 0.00, 0, 0.00],
-				'MOMOREMIT GHANAPAY CASHIN' => ['percentage', 0.50, 0.00, 0, 0.00],
-				'AGENCYBANKING WITHDRAWAL CIT GHQR' => ['percentage', 1.00, 0.00, 0, 0.00],
-				'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY' => ['percentage', 0.20, 0.00, 0, 0.00],
-				'AGENCYBANKING INTERBANK' => ['percentage', 0.50, 0.00, 0, 0.00],
+				'EZWICH CHARGE' => ['percentage', 0.10, 1430.00, 1, 50.00, 'Ezwich transactions'],
+				'MTN DATA BUNDLE' => ['flat', 0.50, 0.00, 0, 0.00, 'MTN data bundle purchases'],
+				'MOMOREMIT GHANAPAY CASHIN' => ['percentage', 0.50, 0.00, 0, 0.00, 'MoMoRemit GhanaPay cash-in'],
+				'AGENCYBANKING WITHDRAWAL CIT GHQR' => ['percentage', 1.00, 0.00, 0, 0.00, 'Agency banking withdrawal - GHQR'],
+				'AGENCYBANKING WITHDRAWAL CIT GCB/FIDELITY' => ['percentage', 0.20, 0.00, 0, 0.00, 'Agency banking withdrawal - GCB/Fidelity'],
+				'AGENCYBANKING INTERBANK' => ['percentage', 0.50, 0.00, 0, 0.00, 'Agency banking interbank transactions'],
 			];
 			foreach($defaults as $type => $config){
 				$existing = $db->query("SELECT id FROM commission_rates WHERE commission_type = :type LIMIT 1", ['type' => $type]);
 				if(empty($existing)){
 					$db->query(
 						"INSERT INTO commission_rates
-						 (commission_type, charge_type, commission_rate, starting_amount, is_capped, cap_value, expected_value, status)
-						 VALUES (:type, :charge_type, :rate, :starting_amount, :is_capped, :cap_value, 0, 1)",
+						 (commission_type, applies_to, charge_type, commission_rate, starting_amount, is_capped, cap_value, expected_value, status)
+						 VALUES (:type, :applies_to, :charge_type, :rate, :starting_amount, :is_capped, :cap_value, 0, 1)",
 						[
 							'type' => $type,
+							'applies_to' => $config[5],
 							'charge_type' => $config[0],
 							'rate' => $config[1],
 							'starting_amount' => $config[2],
@@ -921,8 +1026,19 @@ if(!function_exists('dynamic_charge_ensure_defaults')) {
 							'cap_value' => $config[4],
 						]
 					);
+				}else{
+					$db->query(
+						"UPDATE commission_rates SET applies_to = :applies_to
+						 WHERE commission_type = :type AND (applies_to IS NULL OR TRIM(applies_to) = '')",
+						['applies_to' => $config[5], 'type' => $type]
+					);
 				}
 			}
+			$db->query(
+				"UPDATE commission_rates
+				 SET applies_to = commission_type
+				 WHERE applies_to IS NULL OR TRIM(applies_to) = ''"
+			);
 		}catch(\Throwable $e){
 			error_log('[admin-settings] Dynamic charge configuration setup failed: ' . $e->getMessage());
 		}

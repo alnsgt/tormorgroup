@@ -18,6 +18,37 @@ return [
             'comment' => 'e.g., MTN EVD, Telecel EVD, GhanaPay Cashout, etc.'
         ],
         [
+            'name' => 'applies_to',
+            'type' => 'VARCHAR',
+            'constraint' => 255,
+            'null' => true,
+            'comment' => 'Human-readable transaction or service this charge applies to'
+        ],
+        [
+            'name' => 'transaction_type',
+            'type' => 'VARCHAR',
+            'constraint' => 255,
+            'null' => true
+        ],
+        [
+            'name' => 'network',
+            'type' => 'VARCHAR',
+            'constraint' => 255,
+            'null' => true
+        ],
+        [
+            'name' => 'source_option',
+            'type' => 'VARCHAR',
+            'constraint' => 255,
+            'null' => true
+        ],
+        [
+            'name' => 'source_value',
+            'type' => 'VARCHAR',
+            'constraint' => 255,
+            'null' => true
+        ],
+        [
             'name' => 'commission_rate',
             'type' => 'DECIMAL',
             'constraint' => '10,2',

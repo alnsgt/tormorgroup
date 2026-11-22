@@ -21,6 +21,18 @@ set_value([
 
 ]);
 
+if(!function_exists('ezwich_charge_service_options')){
+	function ezwich_charge_service_options(): array
+	{
+		return [[
+			'key' => 'EZWICH CHARGE',
+			'label' => 'Ezwich',
+			'plugin' => 'ezwich',
+			'rules' => [],
+		]];
+	}
+}
+
 if(!function_exists('ezwich_json_response')){
 	function ezwich_json_response(array $payload, int $status = 200): void
 	{
